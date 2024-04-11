@@ -94,6 +94,7 @@ private:
     std::map< llvm::BasicBlock*, std::map< CDFGVertex*, std::vector< llvm::Instruction* >* >* >* defNode_;
     std::map< llvm::BasicBlock*, std::map< CDFGVertex*, std::vector< llvm::Instruction* >* >* >* useNode_;
 
+    void mooCows(llvm::Function* func);
     void generatebBasicBlockGraph(llvm::Function* func);
     void expandBBGraph(llvm::Function* func);
     void assembleGraph();

@@ -15,6 +15,10 @@
 
 #include <sst_config.h>
 
+#ifdef PIC
+#undef PIC
+#endif
+
 #include <regex>
 #include <iostream>
 #include <algorithm>
@@ -22,7 +26,7 @@
 #include <llvm/Pass.h>
 #include <llvm/IR/Attributes.h>
 #include <llvm/IR/Function.h>
-#include "llvm/IR/BasicBlock.h"
+#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Constant.h>
@@ -31,6 +35,11 @@
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IRReader/IRReader.h>
+
+#include <llvm/IR/Module.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Analysis/LoopInfo.h>
 
 #include <llvm/Demangle/Demangle.h>
 #include <llvm/Support/SourceMgr.h>
@@ -73,6 +82,7 @@ void Parser::generateAppGraph(std::string functionName)
         if( functionIter->getName().find(functionName) != std::string::npos ) {
             pm->run(*functionIter);
 
+            mooCows(&*functionIter);
             generatebBasicBlockGraph(&*functionIter);
             expandBBGraph(&*functionIter);
             assembleGraph();
@@ -95,6 +105,36 @@ void Parser::generateAppGraph(std::string functionName)
     printPyMapper( "00_amapper.dot" );
 
 }// generateAppGraph
+
+void Parser::mooCows(llvm::Function* func)
+{
+    // Initialize the PassBuilder
+    llvm::PassBuilder PB;
+
+    // Create Analysis Managers
+    llvm::LoopAnalysisManager LAM;
+    llvm::FunctionAnalysisManager FAM;
+    llvm::CGSCCAnalysisManager CGAM;
+    llvm::ModuleAnalysisManager MAM;
+
+    // Register the analysis managers to the PassBuilder
+    PB.registerModuleAnalyses(MAM);
+    PB.registerCGSCCAnalyses(CGAM);
+    PB.registerFunctionAnalyses(FAM);
+    PB.registerLoopAnalyses(LAM);
+    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+    llvm::errs() << "Function: " << func->getName() << "\n";
+    // Get LoopInfo for the current function
+    auto &LI = FAM.getResult<llvm::LoopAnalysis>(*func);
+
+    // Iterate through all loops in the function
+    for (auto *L : LI) {
+        llvm::errs() << "  Loop with header: " << L->getHeader()->getName() << "\n";
+        L->dump();
+        llvm::errs() << "\n";
+    }
+}
 
 void Parser::generatebBasicBlockGraph(llvm::Function* func)
 {

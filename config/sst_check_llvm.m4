@@ -23,7 +23,7 @@ AC_DEFUN([SST_CHECK_LLVM_CONFIG],
                   LLVM_CFLAGS="`$LLVM_CFG_PATH --cflags`"
                   LLVM_CXXFLAGS="`$LLVM_CFG_PATH --cxxflags`"
                   LLVM_CPPFLAGS="`$LLVM_CFG_PATH --cppflags`"
-                  LLVM_LDFLAGS="`$LLVM_CFG_PATH --ldflags --libs`"],
+                  LLVM_LDFLAGS="`$LLVM_CFG_PATH --ldflags --system-libs --libs core irreader analysis passes support`"],
                   [sst_check_llvm_happy="no"
                   AC_MSG_RESULT([no])
                   LLVM_CFLAGS=
