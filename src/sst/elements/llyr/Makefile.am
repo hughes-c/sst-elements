@@ -18,6 +18,7 @@ libllyr_la_SOURCES = \
 	graph/vertex.h \
 	parser/parser.h \
 	parser/parser.cc \
+	parser/llvm_test.h \
 	mappers/llyrMapper.h \
 	mappers/simpleMapper.h \
 	mappers/pyMapper.h \

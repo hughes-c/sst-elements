@@ -1,8 +1,8 @@
-// Copyright 2013-2024 NTESS. Under the terms
+// Copyright 2013-2023 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2013-2024, NTESS
+// Copyright (c) 2013-2023, NTESS
 // All rights reserved.
 //
 // Portions are copyright of other developers:
@@ -28,8 +28,8 @@
 #include <llvm/IR/Instruction.h>
 
 #include "graph/graph.h"
-#include "llyrTypes.h"
 #include "pes/peList.h"
+#include "llyrTypes.h"
 
 namespace SST {
 namespace Llyr {
@@ -94,13 +94,12 @@ private:
     std::map< llvm::BasicBlock*, std::map< CDFGVertex*, std::vector< llvm::Instruction* >* >* >* defNode_;
     std::map< llvm::BasicBlock*, std::map< CDFGVertex*, std::vector< llvm::Instruction* >* >* >* useNode_;
 
-    void mooCows(llvm::Function* func);
+    void runAnalysisOnFunction(llvm::Function* func);
+
     void generatebBasicBlockGraph(llvm::Function* func);
     void expandBBGraph(llvm::Function* func);
     void assembleGraph();
     void mergeGraphs();
-
-    void collapseInductionVars();
 
     void printVertex ( const CDFGVertex* ) const;
     void printCDFG( const std::string fileName ) const;

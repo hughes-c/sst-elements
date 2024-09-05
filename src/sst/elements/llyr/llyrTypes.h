@@ -131,6 +131,7 @@ typedef enum {
     REMCONST,
     INC,
     INC_RST,
+    INC_INIT,
     ACC,
     ANY_FP = 0xC0,
     FADD,

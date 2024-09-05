@@ -20,6 +20,7 @@
 #include <iterator>
 #include <vector>
 #include <string>
+#include <queue>
 #include <list>
 
 #include "llyrTypes.h"
@@ -137,6 +138,8 @@ inline opType const getOptype(std::string &opString)
         operation = INC;
     else if( opString == "INC_RST" )
         operation = INC_RST;
+    else if( opString == "INC_INIT" )
+        operation = INC_INIT;
     else if( opString == "ACC" )
         operation = ACC;
     else if( opString == "ANY_FP" )
@@ -295,6 +298,8 @@ inline std::string const getOpString(const opType &op)
         operation = "INC";
     else if( op == INC_RST )
         operation = "INC_RST";
+    else if( op == INC_INIT )
+        operation = "INC_INIT";
     else if( op == ACC )
         operation = "ACC";
     else if( op == ANY_FP )
@@ -399,6 +404,19 @@ inline std::list< std::string >* process_single_level(std::string str, char deli
     }
 
     return result;
+}
+
+inline void push_queue_front(std::queue< LlyrData > &q, LlyrData value)
+{
+    std::queue< LlyrData > tempQueue;
+    tempQueue.push(value);
+
+    while( q.empty() == 0 ) {
+        tempQueue.push(q.front());
+        q.pop();
+    }
+
+    std::swap(q, tempQueue);
 }
 
 inline PairPE process_pair(std::string str, char delim)

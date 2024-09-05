@@ -355,7 +355,6 @@ public:
             }
         }
 
-
         pending_op_ = 0 | routed;
         //if there are values waiting on any of the inputs (queue-0 is a const), this PE could still fire
         for( uint32_t i = 1; i < total_num_inputs; ++i ) {

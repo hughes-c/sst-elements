@@ -204,6 +204,8 @@ void LlyrMapper::addNode(opType op_binding, QueueArgMap* arguments, uint32_t nod
         tempPE = new AdvIntProcessingElement( INC, nodeNum, llyr_config, arguments );
     } else if( op_binding == INC_RST ) {
         tempPE = new AdvIntProcessingElement( INC_RST, nodeNum, llyr_config, arguments );
+    } else if( op_binding == INC_INIT ) {
+        tempPE = new AdvIntProcessingElement( INC_INIT, nodeNum, llyr_config, arguments );
     } else if( op_binding == ACC ) {
         tempPE = new AdvIntProcessingElement( ACC, nodeNum, llyr_config, arguments );
     } else if( op_binding == ROS ) {

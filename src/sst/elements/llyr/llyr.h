@@ -104,6 +104,7 @@ private:
     virtual bool tick( SST::Cycle_t currentCycle );
 
     void handleEvent(StandardMem::Request* req);
+
     /* Handlers for StandardMem::Request types */
     class LlyrMemHandlers : public StandardMem::RequestHandler {
     public:

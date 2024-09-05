@@ -1,8 +1,8 @@
-// Copyright 2013-2024 NTESS. Under the terms
+// Copyright 2013-2023 NTESS. Under the terms
 // of Contract DE-NA0003525 with NTESS, the U.S.
 // Government retains certain rights in this software.
 //
-// Copyright (c) 2013-2024, NTESS
+// Copyright (c) 2013-2023, NTESS
 // All rights reserved.
 //
 // Portions are copyright of other developers:
@@ -24,37 +24,55 @@
 #include <algorithm>
 
 #include <llvm/Pass.h>
-#include <llvm/IR/Attributes.h>
+// #include <llvm/IR/Attributes.h>
 #include <llvm/IR/Function.h>
-#include <llvm/IR/BasicBlock.h>
+// #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/Constant.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/DerivedTypes.h>
+// #include <llvm/IR/Constant.h>
+// #include <llvm/IR/Constants.h>
+// #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Metadata.h>
-#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/PassManager.h>
+// #include <llvm/IR/Dominators.h>
+#include <llvm/IR/InlineAsm.h>
 #include <llvm/IRReader/IRReader.h>
-
+//
 #include <llvm/IR/Module.h>
-#include <llvm/Support/raw_ostream.h>
-#include <llvm/Passes/PassBuilder.h>
-#include <llvm/Analysis/LoopInfo.h>
+// #include <llvm/Support/raw_ostream.h>
 
-#include <llvm/Demangle/Demangle.h>
-#include <llvm/Support/SourceMgr.h>
+#include <llvm/Analysis/LoopAnalysisManager.h>
+#include <llvm/Analysis/LoopInfo.h>
+//
+// #include <llvm/Transforms/Utils/BasicBlockUtils.h>
+// #include <llvm/Transforms/Utils/ValueMapper.h>
+// #include <llvm/Transforms/Utils/LoopUtils.h>
+//
+// #include <llvm/Demangle/Demangle.h>
+// #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
-#include <llvm/Transforms/Utils.h>
-#include <llvm/Transforms/Scalar.h>
+// #include <llvm/Transforms/Utils.h>
+// #include <llvm/Transforms/Scalar.h>
+
+
+#include <llvm/IR/Function.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Passes/PassPlugin.h>
+#include <llvm/Transforms/IPO/PassManagerBuilder.h>
+#include <llvm/Transforms/Utils/Mem2Reg.h>
+#include <llvm/Transforms/Utils/PromoteMemToReg.h>
+#include <llvm/Transforms/Scalar/LoopRotation.h>
 
 #include "parser.h"
+#include "llvm_test.h"
 
 namespace SST {
 namespace Llyr {
 
 void Parser::generateAppGraph(std::string functionName)
 {
-    bool foundOffload;
     llvm::SMDiagnostic Err;
     llvm::LLVMContext Context;
 
@@ -62,32 +80,22 @@ void Parser::generateAppGraph(std::string functionName)
     std::unique_ptr< llvm::Module > mod(llvm::parseIR(irBuff->getMemBufferRef(), Err, Context));
     mod_ = mod.get();
 
-    //get names for anonymous instructions
-    auto pm = std::make_unique<llvm::legacy::FunctionPassManager>(mod_);
-    pm->add(llvm::createPromoteMemoryToRegisterPass());
-    pm->add(llvm::createInstructionNamerPass());
-    //pm->add(llvm::createIndVarSimplifyPass());
-    pm->add(llvm::createLoopUnrollPass());
-    pm->doInitialization();
-
-    foundOffload = 0;
-    for( auto functionIter = mod_->getFunctionList().begin(), functionEnd = mod_->getFunctionList().end(); functionIter != functionEnd; ++functionIter ) {
+    bool foundOffload = 0;
+    for( llvm::Function &func : mod_->functions() ) {
         if( output_->getVerboseLevel() > 64 ) {
             llvm::errs() << "Function Name: ";
-            llvm::errs().write_escaped(functionIter->getName()) << "     ";
-            llvm::errs().write_escaped(llvm::demangle(functionIter->getName().str() )) << '\n';
+            llvm::errs().write_escaped(func.getName()) << "     ";
+            llvm::errs().write_escaped(llvm::demangle(func.getName().str() )) << '\n';
         }
 
         //check each located function to see if it's the offload target
-        if( functionIter->getName().find(functionName) != std::string::npos ) {
-            pm->run(*functionIter);
+        if( func.getName().find(functionName) != std::string::npos ) {
+            runAnalysisOnFunction(&func);
 
-            mooCows(&*functionIter);
-            generatebBasicBlockGraph(&*functionIter);
-            expandBBGraph(&*functionIter);
+            generatebBasicBlockGraph(&func);
+            expandBBGraph(&func);
             assembleGraph();
             mergeGraphs();
-//             collapseInductionVars();
 
             foundOffload = 1;
             break;
@@ -106,35 +114,96 @@ void Parser::generateAppGraph(std::string functionName)
 
 }// generateAppGraph
 
-void Parser::mooCows(llvm::Function* func)
-{
-    // Initialize the PassBuilder
-    llvm::PassBuilder PB;
+void Parser::runAnalysisOnFunction(llvm::Function* func) {
+    if (!func) {
+        llvm::errs() << "Error: Null function provided.\n";
+        return;
+      }
 
-    // Create Analysis Managers
-    llvm::LoopAnalysisManager LAM;
-    llvm::FunctionAnalysisManager FAM;
-    llvm::CGSCCAnalysisManager CGAM;
+    llvm::errs() << "   ------  FUNCTION IR BEFORE ------    " << "\n";
+    func->print(llvm::errs());
+    llvm::errs() << "   ------  END FUNCTION IR BEFORE  ------    " << "\n";
+
+    // Analysis Managers needed for passes
     llvm::ModuleAnalysisManager MAM;
+    llvm::CGSCCAnalysisManager CGAM;
+    llvm::FunctionAnalysisManager FAM;
+    llvm::LoopAnalysisManager LAM;
 
-    // Register the analysis managers to the PassBuilder
+    // Register required analyses for each level (Module, CGSCC, Function, Loop)
+    llvm::PassBuilder PB;
     PB.registerModuleAnalyses(MAM);
     PB.registerCGSCCAnalyses(CGAM);
     PB.registerFunctionAnalyses(FAM);
     PB.registerLoopAnalyses(LAM);
+
+    // Cross-register proxies so analyses can cross between passes
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
-    llvm::errs() << "Function: " << func->getName() << "\n";
-    // Get LoopInfo for the current function
-    auto &LI = FAM.getResult<llvm::LoopAnalysis>(*func);
+    // Initialize FunctionPassManager (note: we must pass the module, not just a function)
+    llvm::FunctionPassManager FPM;
 
-    // Iterate through all loops in the function
-    for (auto *L : LI) {
-        llvm::errs() << "  Loop with header: " << L->getHeader()->getName() << "\n";
-        L->dump();
-        llvm::errs() << "\n";
-    }
-}
+    // Passes that we want to run
+    FPM.addPass(llvm::PromotePass());                       // Memory promotion (old mem2reg)
+    FPM.addPass(InstructionNamerPass());              // Assign names to instructions
+    // Loop rotation
+    FPM.addPass(llvm::createFunctionToLoopPassAdaptor(llvm::LoopRotatePass(), false));
+
+    // Optionally print function names if verbose level is high
+    if (output_->getVerboseLevel() > 64) {
+        FPM.addPass(PrintFunctionNamesPass());
+      }
+
+    // Run the pass manager on the function
+    FPM.run(*func, FAM);
+
+    // Output the transformed function IR
+    llvm::errs() << "   ------  FUNCTION IR AFTER ------    " << "\n";
+    func->print(llvm::errs());
+    llvm::errs() << "   ------  END FUNCTION IR AFTER  ------    " << "\n";
+  }
+
+
+// void Parser::runAnalysisOnFunction(llvm::Function* func) {
+//     llvm::FunctionPassManager FPM;
+//     llvm::ModuleAnalysisManager MAM;
+//     llvm::CGSCCAnalysisManager CGAM;
+//     llvm::FunctionAnalysisManager FAM;
+//     llvm::LoopAnalysisManager LAM;
+//
+//
+//     llvm::errs() << "   ------  FUNCTION IR BEFORE ------    " << "\n";
+//     func->print(llvm::errs());
+//     llvm::errs() << "   ------  END FUNCTION IR BEFORE  ------    " << "\n";
+//
+//     // Need to call crossRegisterProxies in order to get the LoopRotatePass
+//     // to be called per-function; couldn't figure out how to only require
+//     // the function and loop analyses
+//     llvm::PassBuilder PB;
+//     PB.registerModuleAnalyses(MAM);
+//     PB.registerCGSCCAnalyses(CGAM);
+//     PB.registerFunctionAnalyses(FAM);
+//     PB.registerLoopAnalyses(LAM);
+//     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+//
+//     // PromotePass (old mem2reg) and rotate passes needed to find loop bounds
+//     // https://llvm.org/docs/LoopTerminology.html#loop-terminology-loop-rotate
+//     FPM.addPass(llvm::PromotePass());
+//     FPM.addPass(InstructionNamerPass());
+// //     FPM.addPass(llvm::InstSimplifyPass());
+//
+//     FPM.addPass(llvm::createFunctionToLoopPassAdaptor(llvm::LoopRotatePass(), false));
+//
+//     if( output_->getVerboseLevel() > 64 ) {
+//         FPM.addPass(PrintFunctionNamesPass());
+//     }
+//
+//     FPM.run(*func, FAM);
+//
+//     llvm::errs() << "   ------  FUNCTION IR  ------    " << "\n";
+//     func->print(llvm::errs());
+//     llvm::errs() << "   ------  END FUNCTION IR  ------    " << "\n";
+// }
 
 void Parser::generatebBasicBlockGraph(llvm::Function* func)
 {
@@ -363,6 +432,17 @@ void Parser::expandBBGraph(llvm::Function* func)
 
                 std::vector< llvm::Instruction* > *tempUseVector = new std::vector< llvm::Instruction* >;
                 std::vector< llvm::Instruction* > *tempDefVector = new std::vector< llvm::Instruction* >;
+
+                auto *tempInstructionrr = llvm::dyn_cast<llvm::CallInst>(instructionIter);
+                if(tempInstructionrr->isInlineAsm()) {
+                    auto *InlineAsm = llvm::cast<llvm::InlineAsm>(tempInstructionrr->getCalledOperand());
+                    llvm::StringRef myStringy = InlineAsm->getAsmString();
+                    if (myStringy.contains("BEGIN_LOOP_BODY_") == 1) {
+                        llvm::errs() << "HHDFSDAFDSAFSD\n";
+                    } else if (myStringy.contains("END_LOOP_BODY_") == 1) {
+                        llvm::errs() << "YYDFSDAFDSAFSD\n";
+                    }
+                }
 
                 for( auto operandIter = instructionIter->op_begin(), operandEnd = instructionIter->op_end(); operandIter != operandEnd; ++operandIter ) {
                     llvm::Value* tempOperand = operandIter->get();
@@ -1913,60 +1993,6 @@ void Parser::printPyMapper( const std::string fileName ) const
     outputFile.close();
 
 }//END printPyMapper
-
-void Parser::collapseInductionVars()
-{
-    std::cout << "\n\n   ---Collapse Testing---\n" << std::flush;
-
-    auto funcVertexMap = functionGraph_->getVertexMap();
-    for( auto vertexIterator = funcVertexMap->begin(); vertexIterator != funcVertexMap ->end(); ++vertexIterator ) {
-
-        llvm::Instruction* tempInstruction = vertexIterator->second.getValue()->instruction_;
-        if( tempInstruction != NULL ) {
-            std::cout << "vertex: " << vertexIterator->first << "\n";
-
-            //write operands
-            for( auto operandIter = tempInstruction->op_begin(), operandEnd = tempInstruction->op_end(); operandIter != operandEnd; ++operandIter ) {
-                std::cout << operandIter->get()->getNameOrAsOperand() << " -- boopA" << std::endl;
-
-                if( llvm::isa<llvm::Constant>(operandIter) ) {
-                    std::cout << operandIter->getOperandNo() << ": ";
-                    std::cout << vertexIterator->second.getValue()->intConst_ << " ";
-                    std::cout << vertexIterator->second.getValue()->floatConst_ << " ";
-                    std::cout << vertexIterator->second.getValue()->doubleConst_ << " ";
-                    std::cout << std::endl;
-
-                    if( llvm::isa<llvm::ConstantInt>(operandIter) ) {
-                        llvm::ConstantInt* tempConst = llvm::cast<llvm::ConstantInt>(operandIter);
-
-                        std::cout << tempConst->getNameOrAsOperand() << " -- inboop" << std::endl;
-
-                    } else if( llvm::isa<llvm::ConstantFP>(operandIter) ) {
-                        llvm::ConstantFP* tempConst = llvm::cast<llvm::ConstantFP>(operandIter);
-
-                        std::cout << tempConst->getNameOrAsOperand() << " -- fpboop" << std::endl;
-
-                    } else if( llvm::isa<llvm::ConstantExpr>(operandIter) ) {
-
-                        std::cout << operandIter->get()->getNameOrAsOperand() << " -- boopB" << std::endl;
-
-                    } else if( llvm::isa<llvm::GlobalValue>(operandIter) ) {
-
-                        std::cout << operandIter->get()->getNameOrAsOperand() << " -- boopG" << std::endl;
-                    } else {
-                        output_->fatal(CALL_INFO, -1, "Error: No valid operand\n");
-                        exit(0);
-                    }
-                } else {
-
-                    std::cout << operandIter->get()->getNameOrAsOperand() << " -- boopC" << std::endl;
-                }
-
-            }//end for
-        }
-    }
-
-}//END collapseInductionVars
 
 } // namespace llyr
 } // namespace SST

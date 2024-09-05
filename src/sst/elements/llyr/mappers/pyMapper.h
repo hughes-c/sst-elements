@@ -113,7 +113,7 @@ void PyMapper::mapGraph(LlyrGraph< opType > hardwareGraph, LlyrGraph< AppNode > 
 
 //     std::string fileName = "deepmind/strassen2x2_clay.csv";
 //     std::string fileName = "deepmind/strassen_6x7_rect_gap1.csv";
-    std::string fileName = "ipdps24/generic_solution.csv";
+    std::string fileName = "generic_solution.csv";
     output_->verbose(CALL_INFO, 1, 0, "Mapping Application Using: %s\n", fileName.c_str());
 
     std::list< HardwareNode* > node_list;
@@ -166,7 +166,7 @@ void PyMapper::mapGraph(LlyrGraph< opType > hardwareGraph, LlyrGraph< AppNode > 
             // some nodes need queue initialization -- right now, that's mostly const/imm pes TODO fix naming
             if( op == ADDCONST || op == SUBCONST || op == MULCONST || op == DIVCONST || op == REMCONST ) {
                 addNode( op, arguments, hardwareVertex, graphOut, llyr_config );
-            } else if( op == INC || op == INC_RST || op == ACC ) {
+            } else if( op == INC || op == INC_RST || op == INC_INIT || op == ACC ) {
                 addNode( op, arguments, hardwareVertex, graphOut, llyr_config );
             } else if( op == LDADDR || op == STREAM_LD || op == STADDR || op == STREAM_ST ) {
                 addNode( op, arguments, hardwareVertex, graphOut, llyr_config );
@@ -182,10 +182,16 @@ void PyMapper::mapGraph(LlyrGraph< opType > hardwareGraph, LlyrGraph< AppNode > 
         }
     }
 
+    std::cout << "------------------------------------------------------\n";
+    std::cout << "\tAccumulating Edges\n";
+    std::cout << "------------------------------------------------------\n" << std::endl;
+
     // add the edges, ignore queue bindings
     for( auto it = edge_list.begin(); it != edge_list.end(); ++it ) {
         uint32_t source_pe = std::stoul( (*it)->first );
         uint32_t dest_pe = std::stoul( (*it)->second );
+
+        std::cout << "MEEP" << source_pe << "  " << dest_pe << std::endl;
 
         graphOut.addEdge( source_pe, dest_pe );
     }
