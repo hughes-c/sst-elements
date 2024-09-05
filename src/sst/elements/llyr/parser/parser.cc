@@ -332,8 +332,39 @@ void Parser::expandBBGraph(llvm::Function* func)
             //determine operation
             if( tempOpcode == llvm::Instruction::GetElementPtr ) {
                 std::cout << "R#REWREFDSFDASFA" <<std::endl;
-            }
-            if( tempOpcode == llvm::Instruction::Alloca ) {                                     // BEGIN Allocate
+
+                if( llvm::GetElementPtrInst *gepInst = llvm::dyn_cast< llvm::GetElementPtrInst >(instructionIter) ) {
+                    // Print the base pointer (the pointer we're indexing into)
+                    llvm::Value *basePtr = gepInst->getPointerOperand();
+                    std::cout << "Base pointer: ";
+                    basePtr->print(llvm::outs());
+                    std::cout << "\nType of base pointer: ";
+                    basePtr->getType()->print(llvm::outs());
+                    std::cout << "\n";
+
+                    // Iterate over the GEP indices and print them with their types
+                    std::cout << "Indices:\n";
+                    for (auto idx = gepInst->idx_begin(); idx != gepInst->idx_end(); ++idx) {
+                        std::cout << "  Index: ";
+
+                        // Check if the index is a constant
+                        if (llvm::Constant *constantIdx = llvm::dyn_cast<llvm::Constant>(*idx)) {
+                            // It's a constant, print its value
+                            std::cout << "Constant value: ";
+                            constantIdx->print(llvm::outs());
+                          } else {
+                              // It's not a constant, print the index as a variable
+                              (*idx)->print(llvm::outs());
+                            }
+
+                        std::cout << "\n  Type of index: ";
+                        (*idx)->getType()->print(llvm::outs());             // Print the type of the index
+                        std::cout << "\n";
+                      }
+                }
+
+            // END GetElementPtr
+            } else  if( tempOpcode == llvm::Instruction::Alloca ) {
 
                 std::vector< llvm::Instruction* > *tempUseVector = new std::vector< llvm::Instruction* >;
                 std::vector< llvm::Instruction* > *tempDefVector = new std::vector< llvm::Instruction* >;
