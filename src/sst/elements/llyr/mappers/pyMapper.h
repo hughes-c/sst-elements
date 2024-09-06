@@ -212,7 +212,7 @@ void PyMapper::mapGraph(LlyrGraph< opType > hardwareGraph, LlyrGraph< AppNode > 
         std::cout << std::flush;
         std::cout << "num input queues(" << vertexIterator->second.getValue()->getProcessorId() << ")";
         std::cout << ": " << vertexIterator->second.getValue()->getNumInputQueues() << std::endl;
-        std::cout << std::endl;
+        // std::cout << std::endl;
 
         // testing creating all input queues on init
         uint32_t current_node = vertexIterator->first;
@@ -225,6 +225,7 @@ void PyMapper::mapGraph(LlyrGraph< opType > hardwareGraph, LlyrGraph< AppNode > 
         std::cout << std::endl;
 
         vertexIterator->second.getValue()->createInputQueues((*src_node_iter)->const_list_->size() + (*src_node_iter)->input_list_->size());
+        std::cout << std::endl;
     }
 
     for( auto vertexIterator = vertex_map->begin(); vertexIterator != vertex_map->end(); ++vertexIterator ) {

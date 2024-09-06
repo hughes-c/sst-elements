@@ -144,7 +144,7 @@ void Parser::runAnalysisOnFunction(llvm::Function* func) {
     llvm::FunctionPassManager FPM;
 
     // Passes that we want to run
-    FPM.addPass(llvm::PromotePass());                       // Memory promotion (old mem2reg)
+    FPM.addPass(llvm::PromotePass());                 // Memory promotion (old mem2reg)
     FPM.addPass(InstructionNamerPass());              // Assign names to instructions
     // Loop rotation
     FPM.addPass(llvm::createFunctionToLoopPassAdaptor(llvm::LoopRotatePass(), false));
@@ -336,26 +336,31 @@ void Parser::expandBBGraph(llvm::Function* func)
                 if( llvm::GetElementPtrInst *gepInst = llvm::dyn_cast< llvm::GetElementPtrInst >(instructionIter) ) {
                     // Print the base pointer (the pointer we're indexing into)
                     llvm::Value *basePtr = gepInst->getPointerOperand();
-                    std::cout << "Base pointer: ";
-                    basePtr->print(llvm::outs());
+                    std::cout << std::endl << "Base pointer: ";
+                    // Check if the base pointer is a global variable
+                    if( llvm::GlobalVariable *globalVar = llvm::dyn_cast<llvm::GlobalVariable>(basePtr) ) {
+                        globalVar->print(llvm::outs());
+                    } else {
+                        basePtr->print(llvm::outs());
+                    }
                     std::cout << "\nType of base pointer: ";
                     basePtr->getType()->print(llvm::outs());
                     std::cout << "\n";
 
                     // Iterate over the GEP indices and print them with their types
                     std::cout << "Indices:\n";
-                    for (auto idx = gepInst->idx_begin(); idx != gepInst->idx_end(); ++idx) {
+                    for( auto idx = gepInst->idx_begin(); idx != gepInst->idx_end(); ++idx ) {
                         std::cout << "  Index: ";
 
                         // Check if the index is a constant
-                        if (llvm::Constant *constantIdx = llvm::dyn_cast<llvm::Constant>(*idx)) {
+                        if( llvm::Constant *constantIdx = llvm::dyn_cast<llvm::Constant>(*idx) ) {
                             // It's a constant, print its value
                             std::cout << "Constant value: ";
                             constantIdx->print(llvm::outs());
-                          } else {
-                              // It's not a constant, print the index as a variable
-                              (*idx)->print(llvm::outs());
-                            }
+                        } else {
+                            // It's not a constant, print the index as a variable
+                            (*idx)->print(llvm::outs());
+                        }
 
                         std::cout << "\n  Type of index: ";
                         (*idx)->getType()->print(llvm::outs());             // Print the type of the index
@@ -363,6 +368,7 @@ void Parser::expandBBGraph(llvm::Function* func)
                       }
                 }
 
+                std::cout << std::endl;
             // END GetElementPtr
             } else  if( tempOpcode == llvm::Instruction::Alloca ) {
 
