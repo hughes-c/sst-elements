@@ -35,7 +35,7 @@ libllyr_la_SOURCES = \
 deprecated_libllyr_sources =
 
 libllyr_la_CFLAGS = \
-	$(AM_CLFAGS) \
+	$(AM_CFLAGS) \
 	$(LLVM_CFLAGS)
 
 libllyr_la_CXXFLAGS = \
