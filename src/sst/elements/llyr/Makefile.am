@@ -35,7 +35,7 @@ libllyr_la_SOURCES = \
 deprecated_libllyr_sources =
 
 libllyr_la_CFLAGS = \
-	$(AM_CFLAGS) \
+	$(AM_CLFAGS) \
 	$(LLVM_CFLAGS)
 
 libllyr_la_CXXFLAGS = \
@@ -61,7 +61,7 @@ endif
 EXTRA_DIST = \
 	tests/llyr_test.py
 
-deprecated_EXTRA_DIST =
+deprecated_EXTRA_DIST = 
 
 if !SST_ENABLE_PREVIEW_BUILD
 EXTRA_DIST += $(deprecated_EXTRA_DIST)

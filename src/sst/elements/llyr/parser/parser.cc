@@ -48,7 +48,7 @@
 // #include <llvm/Transforms/Utils/ValueMapper.h>
 // #include <llvm/Transforms/Utils/LoopUtils.h>
 //
-// #include <llvm/Demangle/Demangle.h>
+#include <llvm/Demangle/Demangle.h>
 // #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 // #include <llvm/Transforms/Utils.h>
@@ -64,6 +64,8 @@
 #include <llvm/Transforms/Utils/Mem2Reg.h>
 #include <llvm/Transforms/Utils/PromoteMemToReg.h>
 #include <llvm/Transforms/Scalar/LoopRotation.h>
+#include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
 
 #include "parser.h"
 #include "llvm_test.h"
@@ -109,6 +111,9 @@ void Parser::generateAppGraph(std::string functionName)
 
     output_->verbose(CALL_INFO, 1, 0, "Finished parsing...\n");
 
+    // post fixup to handle memory operations
+    fixOperations();
+
     printCDFG( "00_func-ins.dot" );
     printPyMapper( "00_amapper.dot" );
 
@@ -145,14 +150,17 @@ void Parser::runAnalysisOnFunction(llvm::Function* func) {
 
     // Passes that we want to run
     FPM.addPass(llvm::PromotePass());                 // Memory promotion (old mem2reg)
-    FPM.addPass(InstructionNamerPass());              // Assign names to instructions
+    FPM.addPass(llvm::InstCombinePass());
     // Loop rotation
     FPM.addPass(llvm::createFunctionToLoopPassAdaptor(llvm::LoopRotatePass(), false));
+//     FPM.addPass(llvm::GVNPass());                     // Global Value Numbering without constant folding
+
+    FPM.addPass(InstructionNamerPass());              // Assign names to instructions
 
     // Optionally print function names if verbose level is high
     if (output_->getVerboseLevel() > 64) {
         FPM.addPass(PrintFunctionNamesPass());
-      }
+    }
 
     // Run the pass manager on the function
     FPM.run(*func, FAM);
@@ -163,51 +171,10 @@ void Parser::runAnalysisOnFunction(llvm::Function* func) {
     llvm::errs() << "   ------  END FUNCTION IR AFTER  ------    " << "\n";
   }
 
-
-// void Parser::runAnalysisOnFunction(llvm::Function* func) {
-//     llvm::FunctionPassManager FPM;
-//     llvm::ModuleAnalysisManager MAM;
-//     llvm::CGSCCAnalysisManager CGAM;
-//     llvm::FunctionAnalysisManager FAM;
-//     llvm::LoopAnalysisManager LAM;
-//
-//
-//     llvm::errs() << "   ------  FUNCTION IR BEFORE ------    " << "\n";
-//     func->print(llvm::errs());
-//     llvm::errs() << "   ------  END FUNCTION IR BEFORE  ------    " << "\n";
-//
-//     // Need to call crossRegisterProxies in order to get the LoopRotatePass
-//     // to be called per-function; couldn't figure out how to only require
-//     // the function and loop analyses
-//     llvm::PassBuilder PB;
-//     PB.registerModuleAnalyses(MAM);
-//     PB.registerCGSCCAnalyses(CGAM);
-//     PB.registerFunctionAnalyses(FAM);
-//     PB.registerLoopAnalyses(LAM);
-//     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-//
-//     // PromotePass (old mem2reg) and rotate passes needed to find loop bounds
-//     // https://llvm.org/docs/LoopTerminology.html#loop-terminology-loop-rotate
-//     FPM.addPass(llvm::PromotePass());
-//     FPM.addPass(InstructionNamerPass());
-// //     FPM.addPass(llvm::InstSimplifyPass());
-//
-//     FPM.addPass(llvm::createFunctionToLoopPassAdaptor(llvm::LoopRotatePass(), false));
-//
-//     if( output_->getVerboseLevel() > 64 ) {
-//         FPM.addPass(PrintFunctionNamesPass());
-//     }
-//
-//     FPM.run(*func, FAM);
-//
-//     llvm::errs() << "   ------  FUNCTION IR  ------    " << "\n";
-//     func->print(llvm::errs());
-//     llvm::errs() << "   ------  END FUNCTION IR  ------    " << "\n";
-// }
-
 void Parser::generatebBasicBlockGraph(llvm::Function* func)
 {
-    output_->verbose(CALL_INFO, 1, 0, "Generating BB Graph...\n");
+    // output_->verbose(CALL_INFO, 1, 0, "Generating BB Graph...\n");
+    llvm::errs() <<  "Generating BB Graph...\n";
 
     if( output_->getVerboseLevel() > 64 ) {
         llvm::errs().write_escaped(llvm::demangle(func->getName().str() )) << '\n';
@@ -257,14 +224,18 @@ void Parser::generatebBasicBlockGraph(llvm::Function* func)
     }// basic block loop
 
     // bb_Graph should be complete here
-    output_->verbose(CALL_INFO, 1, 0, "...Basic Block Graph Done.\n");
+    // output_->verbose(CALL_INFO, 1, 0, "...Basic Block Graph Done.\n");
+    llvm::errs() <<  "...Basic Block Graph Done.\n";
     bbGraph_->printDot("00_bb.dot");
 }// generatebBasicBlockGraph
 
 
 void Parser::expandBBGraph(llvm::Function* func)
 {
-    output_->verbose(CALL_INFO, 1, 0, "\n\nGenerating Flow Graph...\n");
+    // output_->verbose(CALL_INFO, 1, 0, "Generating Flow Graph...\n");
+    llvm::errs() <<  "Generating Flow Graph...\n";
+
+    llvm::DataLayout dataLayout = func->getParent()->getDataLayout();
 
     CDFGVertex* entryVertex;
     CDFGVertex* outputVertex;
@@ -281,9 +252,11 @@ void Parser::expandBBGraph(llvm::Function* func)
         (*defNode_)[&blockIter] = new std::map< CDFGVertex*, std::vector< llvm::Instruction* >* >;
 
         if( output_->getVerboseLevel() > 64 ) {
-            llvm::errs() << "\t+++Basic Block Name(" << &blockIter << "): ";
+            llvm::errs() << "\t+++Expanded Basic Block Name(" << &blockIter << "): ";
             llvm::errs().write_escaped(blockIter.getName()) << '\n';
         }
+
+        std::cout << std::endl;
 
         for( auto instructionIter = blockIter.begin(), instructionEnd = blockIter.end(); instructionIter != instructionEnd; ++instructionIter ) {
             tempOpcode = instructionIter->getOpcode();
@@ -301,6 +274,7 @@ void Parser::expandBBGraph(llvm::Function* func)
             instructionIter->print(rso);
             outputVertex->instructionName_ = rso.str();
             outputVertex->instruction_ = &*instructionIter;
+            outputVertex->memAddr_ = 0x00;
             outputVertex->haveConst_ = 0;
             outputVertex->intConst_ = 0x00;
             outputVertex->floatConst_ = 0x00;
@@ -314,7 +288,7 @@ void Parser::expandBBGraph(llvm::Function* func)
             }
 
             instructionMap_->insert( std::pair< llvm::Instruction*, CDFGVertex* >(&*instructionIter, outputVertex) );
-
+            std::cout << std::endl;
             if( output_->getVerboseLevel() > 64 ) {
                 llvm::errs() << "-------------------------------------------- Users List --------------------------------------------\n";
 
@@ -329,48 +303,10 @@ void Parser::expandBBGraph(llvm::Function* func)
                 llvm::errs() << "----------------------------------------------------------------------------------------------------\n";
             }
 
+            std::cout << std::endl;
+
             //determine operation
-            if( tempOpcode == llvm::Instruction::GetElementPtr ) {
-                std::cout << "R#REWREFDSFDASFA" <<std::endl;
-
-                if( llvm::GetElementPtrInst *gepInst = llvm::dyn_cast< llvm::GetElementPtrInst >(instructionIter) ) {
-                    // Print the base pointer (the pointer we're indexing into)
-                    llvm::Value *basePtr = gepInst->getPointerOperand();
-                    std::cout << std::endl << "Base pointer: ";
-                    // Check if the base pointer is a global variable
-                    if( llvm::GlobalVariable *globalVar = llvm::dyn_cast<llvm::GlobalVariable>(basePtr) ) {
-                        globalVar->print(llvm::outs());
-                    } else {
-                        basePtr->print(llvm::outs());
-                    }
-                    std::cout << "\nType of base pointer: ";
-                    basePtr->getType()->print(llvm::outs());
-                    std::cout << "\n";
-
-                    // Iterate over the GEP indices and print them with their types
-                    std::cout << "Indices:\n";
-                    for( auto idx = gepInst->idx_begin(); idx != gepInst->idx_end(); ++idx ) {
-                        std::cout << "  Index: ";
-
-                        // Check if the index is a constant
-                        if( llvm::Constant *constantIdx = llvm::dyn_cast<llvm::Constant>(*idx) ) {
-                            // It's a constant, print its value
-                            std::cout << "Constant value: ";
-                            constantIdx->print(llvm::outs());
-                        } else {
-                            // It's not a constant, print the index as a variable
-                            (*idx)->print(llvm::outs());
-                        }
-
-                        std::cout << "\n  Type of index: ";
-                        (*idx)->getType()->print(llvm::outs());             // Print the type of the index
-                        std::cout << "\n";
-                      }
-                }
-
-                std::cout << std::endl;
-            // END GetElementPtr
-            } else  if( tempOpcode == llvm::Instruction::Alloca ) {
+            if( tempOpcode == llvm::Instruction::Alloca ) {
 
                 std::vector< llvm::Instruction* > *tempUseVector = new std::vector< llvm::Instruction* >;
                 std::vector< llvm::Instruction* > *tempDefVector = new std::vector< llvm::Instruction* >;
@@ -398,6 +334,57 @@ void Parser::expandBBGraph(llvm::Function* func)
                     }
                 }
 
+                // Find the total size that's being allocated & update the memory address on this node
+                if( llvm::AllocaInst *allocaInst = llvm::dyn_cast< llvm::AllocaInst >(instructionIter) ) {
+                    outputVertex->memAddr_ = currentAddr_;
+                    llvm::Type *allocatedType = allocaInst->getAllocatedType();
+
+                        // Calculate the size of the allocated type.
+                        if( allocatedType->isIntegerTy() || allocatedType->isFloatingPointTy() || allocatedType->isPointerTy() ) {
+                            // Scalars: integers, floats, pointers
+                            uint64_t typeSize = dataLayout.getTypeAllocSize(allocatedType);
+                            llvm::errs() << "Size: " << typeSize << "\n";
+                            currentAddr_ = currentAddr_ + typeSize;
+                            llvm::errs() << "CurrentAddr: " << currentAddr_ << "\n";
+
+                        } else if (allocatedType->isArrayTy()) {
+                            // Array: multiply the size of the element type by the number of elements.
+                            llvm::ArrayType *arrayType = llvm::cast<llvm::ArrayType>(allocatedType);
+                            uint64_t elementSize = dataLayout.getTypeAllocSize(arrayType->getElementType());
+                            currentAddr_ = currentAddr_ + (elementSize * arrayType->getNumElements());
+
+                            llvm::errs() << "Size: " << elementSize * arrayType->getNumElements() << "\n";
+                            llvm::errs() << "CurrentAddr: " << currentAddr_ << "\n";
+
+                        } else if (allocatedType->isStructTy()) {
+                            // Struct: sum the size of each element.
+                            llvm::StructType *structType = llvm::cast<llvm::StructType>(allocatedType);
+                            uint64_t structSize = 0;
+                            for (unsigned i = 0; i < structType->getNumElements(); ++i) {
+                                llvm::Type *elementType = structType->getElementType(i);
+                                structSize += dataLayout.getTypeAllocSize(elementType); // Add size of each field.
+                            }
+                            currentAddr_ = currentAddr_ + structSize;
+                            llvm::errs() << "Size: " << structSize << "\n";
+                            llvm::errs() << "CurrentAddr: " << currentAddr_ << "\n";
+
+
+                        } else if (allocatedType->isVectorTy()) {
+                            // Vector: multiply the size of the element type by the number of elements.
+                            llvm::VectorType *vectorType = llvm::cast<llvm::VectorType>(allocatedType);
+                            uint64_t elementSize = dataLayout.getTypeAllocSize(vectorType->getElementType());
+                            uint64_t numElements = vectorType->getElementCount().getFixedValue();
+
+                            currentAddr_ = currentAddr_ + (elementSize * numElements);
+                            llvm::errs() << "Size: " << elementSize * numElements << "\n";
+                            llvm::errs() << "CurrentAddr: " << currentAddr_ << "\n";
+
+                        } else {
+                            llvm::errs() << "Unknown type allocated.\n";
+                        }
+                }
+
+
             // END Allocate
             } else if( tempOpcode == llvm::Instruction::Ret ) {                                     // BEGIN Return
                 std::vector< llvm::Instruction* > *tempUseVector = new std::vector< llvm::Instruction* >;
@@ -418,7 +405,7 @@ void Parser::expandBBGraph(llvm::Function* func)
 
                     //create the node/def entries
                     (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(outputVertex, new std::vector< llvm::Instruction* >) );
-                } else if( llvm::isa<llvm::Instruction>(tempOperand) ) {
+                } else if( llvm::isa< llvm::Instruction >(tempOperand) ) {
                     std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->find(llvm::cast<llvm::Instruction>(tempOperand));
                     if( it != instructionMap_->end() ) {
                         inputVertex = instructionMap_->at(llvm::cast<llvm::Instruction>(tempOperand));
@@ -493,7 +480,7 @@ void Parser::expandBBGraph(llvm::Function* func)
                         //create the node/def entries
                         (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
 
-                    } else if( llvm::isa<llvm::Instruction>(tempOperand) ) {
+                    } else if( llvm::isa< llvm::Instruction >(tempOperand) ) {
                         std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->find(llvm::cast<llvm::Instruction>(tempOperand));
 
                         if( output_->getVerboseLevel() > 64 ) {
@@ -614,7 +601,7 @@ void Parser::expandBBGraph(llvm::Function* func)
                 }
 
                 //Get src information
-                if( llvm::isa<llvm::Instruction>(tempSrc) ) {
+                if( llvm::isa< llvm::Instruction >(tempSrc) ) {
                     std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->find(llvm::cast<llvm::Instruction>(tempSrc));
                     if( it != instructionMap_->end() ) {
                         inputVertex = instructionMap_->at(llvm::cast<llvm::Instruction>(tempSrc));
@@ -629,21 +616,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                         outputVertex->floatConst_ = 0x00;
                         outputVertex->doubleConst_ = 0x00;
 
-//                         inputVertex = new CDFGVertex;
-//                         inputVertex->instruction_ = 0x00;
-//                         inputVertex->haveConst_ = 1;
-//                         inputVertex->intConst_ = alignment;
-//                         inputVertex->floatConst_ = 0x00;
-//                         inputVertex->doubleConst_ = 0x00;
-
-//                         inputVertexID = g.addVertex(inputVertex);
-//                         (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                         // create the node/use entries
-//                         (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                         //create the node/def entries
-//                         (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
                     }
 
                     //add variable to node use list
@@ -657,28 +629,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                     outputVertex->doubleConst_ = 0x00;
                     outputVertex->valueName_ = tempSrc->getName().str();
 
-//                     inputVertex = new CDFGVertex;
-//                     inputVertex->instruction_ = 0x00;
-//                     inputVertex->haveConst_ = 1;
-//                     inputVertex->intConst_ = alignment;
-//                     inputVertex->floatConst_ = 0x00;
-//                     inputVertex->doubleConst_ = 0x00;
-//                     inputVertex->valueName_ = tempSrc->getName().str();
-
-//                     inputVertexID = g.addVertex(inputVertex);
-//                     g.addEdge(inputVertexID, outputVertexID);
-// //                     if(inserted)
-// //                     {
-// //                         g[edgeDesc].value_t = tempSrc;
-// //                     }
-//
-//                     (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                     // create the node/use entries
-//                     (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                     //create the node/def entries
-//                     (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
 
                 }//end src
 
@@ -704,14 +654,19 @@ void Parser::expandBBGraph(llvm::Function* func)
                 std::vector< llvm::Instruction* > *tempUseVector = new std::vector< llvm::Instruction* >;
                 std::vector< llvm::Instruction* > *tempDefVector = new std::vector< llvm::Instruction* >;
 
-                llvm::Value* tempDst = llvm::cast<llvm::StoreInst>(instructionIter)->getPointerOperand();
-                llvm::Value* tempSrc = llvm::cast<llvm::StoreInst>(instructionIter)->getValueOperand();
+                llvm::Value* tempDst = llvm::cast< llvm::StoreInst >(instructionIter)->getPointerOperand();
+                llvm::Value* tempSrc = llvm::cast< llvm::StoreInst >(instructionIter)->getValueOperand();
 
                 //Get destination dependency
-                if( llvm::isa<llvm::Instruction>(tempDst) ) {
+                if( llvm::isa< llvm::Instruction >(tempDst) ) {
                     std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->find(llvm::cast<llvm::Instruction>(tempDst));
                     if( it != instructionMap_->end() ) {
-                        inputVertex = instructionMap_->at(llvm::cast<llvm::Instruction>(tempDst));
+                        inputVertex = instructionMap_->at(llvm::cast< llvm::Instruction >(tempDst));
+
+                        if( llvm::AllocaInst *allocaInst = llvm::dyn_cast< llvm::AllocaInst >(tempDst) ) {
+                            llvm::errs() << "ADDR " << inputVertex->memAddr_ << "\n";
+                            outputVertex->memAddr_ = inputVertex->memAddr_;
+                        }
 
                         if( output_->getVerboseLevel() > 64 ) {
                             llvm::errs() << "+dst Found " << inputVertex->instruction_ << " in instructionMap_\n";
@@ -745,27 +700,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                         outputVertex->doubleConst_ = 0x00;
                         outputVertex->valueName_ = tempSrc->getName().str();
 
-//                     inputVertex = new CDFGVertex;
-//                     inputVertex->instruction_ = 0x00;
-//                     inputVertex->haveConst_ = 1;
-//                     inputVertex->intConst_ = 0xFF;
-//                     inputVertex->floatConst_ = 0x00;
-//                     inputVertex->doubleConst_ = 0x00;
-//                     inputVertex->valueName_ = tempSrc->getName().str();
-//
-//                     inputVertexID = g.addVertex(inputVertex);
-//                     ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                     edgeProp->value_ = llvm::cast<llvm::StoreInst>(instructionIter)->getValueOperand();
-//                     g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                     (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                     // create the node/use entries
-//                     (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                     //create the node/def entries
-//                     (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-
                 } else {
                     if( llvm::isa<llvm::ConstantInt>(tempDst) ) {                           // signed/unsigned ints
                         llvm::ConstantInt* tempConst = llvm::cast<llvm::ConstantInt>(tempDst);
@@ -775,27 +709,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                             outputVertex->intConst_ = tempConst->getSExtValue();
                             outputVertex->floatConst_ = 0x00;
                             outputVertex->doubleConst_ = 0x00;
-
-//                         inputVertex = new CDFGVertex;
-//                         inputVertex->instruction_ = 0x00;
-//                         inputVertex->haveConst_ = 1;
-//                         inputVertex->intConst_ = tempConst->getSExtValue();
-//                         inputVertex->floatConst_ = 0x00;
-//                         inputVertex->doubleConst_ = 0x00;
-//
-//                         inputVertexID = g.addVertex(inputVertex);
-//                         (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                         // Insert edge for const here since we can't discover it when we walk the graph
-//                         ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                         edgeProp->value_ = 0x00;
-//                         g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                         // create the node/use entries
-//                         (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                         //create the node/def entries
-//                         (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
 
                     } else if( llvm::isa<llvm::ConstantFP>(tempDst) ) {                          // floats and doubles
                         llvm::ConstantFP* tempConst = llvm::cast<llvm::ConstantFP>(tempDst);
@@ -809,30 +722,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                             } else {
                                 outputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
                             }
-
-//                         inputVertex = new CDFGVertex;
-//                         inputVertex->instruction_ = 0x00;
-//                         inputVertex->haveConst_ = 1;
-//                         inputVertex->intConst_ = 0x00;
-//                         if(tempDst->getType()->isFloatTy()) {
-//                             inputVertex->doubleConst_ = (double) tempConst->getValueAPF().convertToFloat();
-//                         } else {
-//                             inputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
-//                         }
-//
-//                         inputVertexID = g.addVertex(inputVertex);
-//                         (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                         // Insert edge for const here since we can't discover it when we walk the graph
-//                         ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                         edgeProp->value_ = 0x00;
-//                         g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                         // create the node/use entries
-//                         (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                         //create the node/def entries
-//                         (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
 
                     } else {
                         inputVertex = new CDFGVertex;
@@ -860,7 +749,7 @@ void Parser::expandBBGraph(llvm::Function* func)
                 }// END dst dep check
 
                 //Get source dependency
-                if( llvm::isa<llvm::Instruction>(tempSrc) ) {
+                if( llvm::isa< llvm::Instruction >(tempSrc) ) {
                     std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->find(llvm::cast<llvm::Instruction>(tempSrc));
                     if( it != instructionMap_->end() ) {
                         inputVertex = instructionMap_->at(llvm::cast<llvm::Instruction>(tempSrc));
@@ -896,27 +785,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                     outputVertex->doubleConst_ = 0x00;
                     outputVertex->valueName_ = tempSrc->getName().str();
 
-//                     inputVertex = new CDFGVertex;
-//                     inputVertex->instruction_ = 0x00;
-//                     inputVertex->haveConst_ = 1;
-//                     inputVertex->intConst_ = 0xFF;
-//                     inputVertex->floatConst_ = 0x00;
-//                     inputVertex->doubleConst_ = 0x00;
-//                     inputVertex->valueName_ = tempSrc->getName().str();
-
-//                     inputVertexID = g.addVertex(inputVertex);
-//                     (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                     ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                     edgeProp->value_ = llvm::cast<llvm::StoreInst>(instructionIter)->getValueOperand();
-//                     g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                     // create the node/use entries
-//                     (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                     //create the node/def entries
-//                     (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-
                 } else {
                     if( llvm::isa<llvm::ConstantInt>(tempSrc) ) {                             // signed/unsigned ints
                         llvm::ConstantInt* tempConst = llvm::cast<llvm::ConstantInt>(tempSrc);
@@ -925,27 +793,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                         outputVertex->intConst_ = tempConst->getSExtValue();
                         outputVertex->floatConst_ = 0x00;
                         outputVertex->doubleConst_ = 0x00;
-
-//                         inputVertex = new CDFGVertex;
-//                         inputVertex->instruction_ = 0x00;
-//                         inputVertex->haveConst_ = 1;
-//                         inputVertex->intConst_ = tempConst->getSExtValue();
-//                         inputVertex->floatConst_ = 0x00;
-//                         inputVertex->doubleConst_ = 0x00;
-
-//                         inputVertexID = g.addVertex(inputVertex);
-//                         (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                         // Insert edge for const here since we can't discover it when we walk the graph
-//                         ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                         edgeProp->value_ = 0x00;
-//                         g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                         // create the node/use entries
-//                         (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                         //create the node/def entries
-//                         (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
 
                     } else if( llvm::isa<llvm::ConstantFP>(tempSrc) ) {                         // floats and doubles
                         llvm::ConstantFP* tempConst = llvm::cast<llvm::ConstantFP>(tempSrc);
@@ -958,28 +805,7 @@ void Parser::expandBBGraph(llvm::Function* func)
                             outputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
                         }
 
-//                         inputVertex = new CDFGVertex;
-//                         inputVertex->instruction_ = 0x00;
-//                         inputVertex->haveConst_ = 1;
-//                         inputVertex->intConst_ = 0x00;
-//     //                         if(tempSrc->getType()->isFloatTy())
-//     //                            inputVertex->floatConst = tempConst->getValueAPF().convertToFloat();
-//     //                         else
-//                         inputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
 
-//                         inputVertexID = g.addVertex(inputVertex);
-//                         (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                         // Insert edge for const here since we can't discover it when we walk the graph
-//                         ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                         edgeProp->value_ = 0x00;
-//                         g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                         // create the node/use entries
-//                         (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                         //create the node/def entries
-//                         (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
                     } else {
                         inputVertex = new CDFGVertex;
                         inputVertex->instruction_ = 0x00;
@@ -1026,6 +852,8 @@ void Parser::expandBBGraph(llvm::Function* func)
 
             //END Store
             } else if( tempOpcode == llvm::Instruction::GetElementPtr ){                                     // BEGIN GEP
+                llvm::errs() << "R#REWREFDSFDASFA\n";
+
                 std::vector< llvm::Instruction* > *tempUseVector = new std::vector< llvm::Instruction* >;
                 std::vector< llvm::Instruction* > *tempDefVector = new std::vector< llvm::Instruction* >;
 
@@ -1041,27 +869,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                             outputVertex->floatConst_ = 0x00;
                             outputVertex->doubleConst_ = 0x00;
 
-//                             inputVertex = new CDFGVertex;
-//                             inputVertex->instruction_ = 0x00;
-//                             inputVertex->haveConst_ = 1;
-//                             inputVertex->intConst_ = tempConst->getSExtValue();
-//                             inputVertex->floatConst_ = 0x00;
-//                             inputVertex->doubleConst_ = 0x00;
-
-//                             inputVertexID = g.addVertex(inputVertex);
-//                             (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                             // Insert edge for const here since we can't discover it when we walk the graph
-//                             ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                             edgeProp->value_ = 0x00;
-//                             g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                             // create the node/use entries
-//                             (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                             //create the node/def entries
-//                             (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-
                         } else if( llvm::isa<llvm::ConstantFP>(tempOperand) ) {                         // floats and doubles
                             llvm::ConstantFP* tempConst = llvm::cast<llvm::ConstantFP>(tempOperand);
 
@@ -1073,31 +880,9 @@ void Parser::expandBBGraph(llvm::Function* func)
                                 outputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
                             }
 
-//                             inputVertex = new CDFGVertex;
-//                             inputVertex->instruction_ = 0x00;
-//                             inputVertex->haveConst_ = 1;
-//                             inputVertex->intConst_ = 0x00;
-//     //                            if(tempOperand->getType()->isFloatTy())
-//     //                               inputVertex->floatConst = tempConst->getValueAPF().convertToFloat();
-//     //                            else
-//                             inputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
-
-//                             inputVertexID = g.addVertex(inputVertex);
-//                             (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                             // Insert edge for const here since we can't discover it when we walk the graph
-//                             ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                             edgeProp->value_ = 0x00;
-//                             g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                             // create the node/use entries
-//                             (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                             //create the node/def entries
-//                             (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
                         }
 
-                    } else if( llvm::isa<llvm::Instruction>(tempOperand) ) {
+                    } else if( llvm::isa< llvm::Instruction >(tempOperand) ) {
                         std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->find(llvm::cast<llvm::Instruction>(tempOperand));
 
                         if( output_->getVerboseLevel() > 64 ) {
@@ -1168,26 +953,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                             outputVertex->floatConst_ = 0x00;
                             outputVertex->doubleConst_ = 0x00;
 
-//                             inputVertex = new CDFGVertex;
-//                             inputVertex->instruction_ = 0x00;
-//                             inputVertex->haveConst_ = 1;
-//                             inputVertex->intConst_ = tempConst->getSExtValue();
-//                             inputVertex->floatConst_ = 0x00;
-//                             inputVertex->doubleConst_ = 0x00;
-
-//                             inputVertexID = g.addVertex(inputVertex);
-//                             (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                             // Insert edge for const here since we can't discover it when we walk the graph
-//                             ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                             edgeProp->value_ = 0x00;
-//                             g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                             // create the node/use entries
-//                             (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                             //create the node/def entries
-//                             (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
 
                         } else if( llvm::isa<llvm::ConstantFP>(tempOperand) ) {                          // floats and doubles
                             llvm::ConstantFP* tempConst = llvm::cast<llvm::ConstantFP>(tempOperand);
@@ -1200,30 +965,8 @@ void Parser::expandBBGraph(llvm::Function* func)
                                 outputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
                             }
 
-//                             inputVertex = new CDFGVertex;
-//                             inputVertex->instruction_ = 0x00;
-//                             inputVertex->haveConst_ = 1;
-//                             inputVertex->intConst_ = 0x00;
-//     //                            if(tempOperand->getType()->isFloatTy())
-//     //                               inputVertex->floatConst = tempConst->getValueAPF().convertToFloat();
-//     //                            else
-//                             inputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
-
-//                             inputVertexID = g.addVertex(inputVertex);
-//                             (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                             // Insert edge for const here since we can't discover it when we walk the graph
-//                             ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                             edgeProp->value_ = 0x00;
-//                             g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                             // create the node/use entries
-//                             (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                             //create the node/def entries
-//                             (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
                         }
-                    } else if( llvm::isa<llvm::Instruction>(tempOperand) ) {
+                    } else if( llvm::isa< llvm::Instruction >(tempOperand) ) {
                         std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->find(llvm::cast<llvm::Instruction>(tempOperand));
 
                         if( output_->getVerboseLevel() > 64 ) {
@@ -1263,25 +1006,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                         outputVertex->floatConst_ = 0x00;
                         outputVertex->doubleConst_ = 0x00;
 
-//                         inputVertex = new CDFGVertex;
-//                         inputVertex->instruction_ = 0x00;
-//                         inputVertex->haveConst_ = 1;
-//                         inputVertex->intConst_ = 0xFF;
-//                         inputVertex->floatConst_ = 0x00;
-//                         inputVertex->doubleConst_ = 0x00;
-
-//                         inputVertexID = g.addVertex(inputVertex);
-//                         (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                         ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                         edgeProp->value_ = 0x00;
-//                         g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                         // create the node/use entries
-//                         (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                         //create the node/def entries
-//                         (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
                     }
                 }
 
@@ -1319,27 +1043,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                             outputVertex->floatConst_ = 0x00;
                             outputVertex->doubleConst_ = 0x00;
 
-//                             inputVertex = new CDFGVertex;
-//                             inputVertex->instruction_ = 0x00;
-//                             inputVertex->haveConst_ = 1;
-//                             inputVertex->intConst_ = tempConst->getSExtValue();
-//                             inputVertex->floatConst_ = 0x00;
-//                             inputVertex->doubleConst_ = 0x00;
-
-//                             inputVertexID = g.addVertex(inputVertex);
-//                             (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                             // Insert edge for const here since we can't discover it when we walk the graph
-//                             ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                             edgeProp->value_ = 0x00;
-//                             g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                             // create the node/use entries
-//                             (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                             //create the node/def entries
-//                             (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-
                         }
                         else if( llvm::isa<llvm::ConstantFP>(tempOperand) )                           // floats and doubles
                         {
@@ -1352,32 +1055,9 @@ void Parser::expandBBGraph(llvm::Function* func)
                             } else {
                                 outputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
                             }
-
-//                             inputVertex = new CDFGVertex;
-//                             inputVertex->instruction_ = 0x00;
-//                             inputVertex->haveConst_ = 1;
-//                             inputVertex->intConst_ = 0x00;
-//     //                            if(tempOperand->getType()->isFloatTy())
-//     //                               inputVertex->floatConst = tempConst->getValueAPF().convertToFloat();
-//     //                            else
-//                             inputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
-
-//                                 inputVertexID = g.addVertex(inputVertex);
-//                             (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                             // Insert edge for const here since we can't discover it when we walk the graph
-//                             ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                             edgeProp->value_ = 0x00;
-//                             g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                             // create the node/use entries
-//                             (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                             //create the node/def entries
-//                             (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(inputVertex, new std::vector< llvm::Instruction* >) );
                         }
 
-                    } else if( llvm::isa<llvm::Instruction>(tempOperand) ) {
+                    } else if( llvm::isa< llvm::Instruction >(tempOperand) ) {
                         std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->find(llvm::cast<llvm::Instruction>(tempOperand));
 
                         if( output_->getVerboseLevel() > 64 ) {
@@ -1449,26 +1129,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                             outputVertex->floatConst_ = 0x00;
                             outputVertex->doubleConst_ = 0x00;
 
-//                             inputVertex = new CDFGVertex;
-//                             inputVertex->instruction_ = 0x00;
-//                             inputVertex->haveConst_ = 1;
-//                             inputVertex->intConst_ = tempConst->getSExtValue();
-//                             inputVertex->floatConst_ = 0x00;
-//                             inputVertex->doubleConst_ = 0x00;
-
-//                             inputVertexID = g.addVertex(inputVertex);
-//                             (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                             // Insert edge for const here since we can't discover it when we walk the graph
-//                             ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                             edgeProp->value_ = 0x00;
-//                             g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                             // create the node/use entries
-//                             (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(outputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                             //create the node/def entries
-//                             (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(outputVertex, new std::vector< llvm::Instruction* >) );
 
                         } else if( llvm::isa<llvm::ConstantFP>(tempOperand) ){                           // floats and doubles
                             llvm::ConstantFP* tempConst = llvm::cast<llvm::ConstantFP>(tempOperand);
@@ -1480,31 +1140,8 @@ void Parser::expandBBGraph(llvm::Function* func)
                             } else {
                                 outputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
                             }
-
-//                             inputVertex = new CDFGVertex;
-//                             inputVertex->instruction_ = 0x00;
-//                             inputVertex->haveConst_ = 1;
-//                             inputVertex->intConst_ = 0x00;
-//     //                            if(tempOperand->getType()->isFloatTy())
-//     //                               inputVertex->floatConst = tempConst->getValueAPF().convertToFloat();
-//     //                            else
-//                             inputVertex->doubleConst_ = tempConst->getValueAPF().convertToDouble();
-
-//                             inputVertexID = g.addVertex(inputVertex);
-//                             (*vertexList_)[&blockIter].push_back(inputVertex);
-//
-//                             // Insert edge for const here since we can't discover it when we walk the graph
-//                             ParserEdgeProperties* edgeProp = new ParserEdgeProperties;
-//                             edgeProp->value_ = 0x00;
-//                             g.addEdge(inputVertexID, outputVertexID, edgeProp);
-//
-//                             // create the node/use entries
-//                             (*useNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(outputVertex, new std::vector< llvm::Instruction* >) );
-//
-//                             //create the node/def entries
-//                             (*defNode_)[&blockIter]->insert( std::pair<CDFGVertex*, std::vector< llvm::Instruction* >* >(outputVertex, new std::vector< llvm::Instruction* >) );
                         }
-                    } else if( llvm::isa<llvm::Instruction>(tempOperand) ) {
+                    } else if( llvm::isa< llvm::Instruction >(tempOperand) ) {
                         std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->find(llvm::cast<llvm::Instruction>(tempOperand));
 
                         if( output_->getVerboseLevel() > 64 ) {
@@ -1577,6 +1214,8 @@ void Parser::expandBBGraph(llvm::Function* func)
                 }
             }
 
+            std::cout << std::endl;
+
             if( output_->getVerboseLevel() > 64 ) {
                 llvm::errs() <<   "********************************************* Ins Map  *********************************************\n";
                 for( std::map< llvm::Instruction*,CDFGVertex* >::iterator it = instructionMap_->begin(); it != instructionMap_->end(); ++it ) {
@@ -1603,11 +1242,15 @@ void Parser::expandBBGraph(llvm::Function* func)
 
                 llvm::errs() << "\n";
             }
-        }
-    }
 
+            std::cout << std::endl;
+        }
+        std::cout << std::endl;
+    }
+    std::cout << std::endl;
     // should be complete here
-    output_->verbose(CALL_INFO, 1, 0, "...Flow Graph Done.\n");
+    // output_->verbose(CALL_INFO, 1, 0, "...Flow Graph Done.\n");
+    llvm::errs() <<  "...Flow Graph Done.\n";
 
 }//END expandBBGraph
 
@@ -1703,7 +1346,8 @@ void Parser::assembleGraph(void)
 
         // Finally, check for orphaned nodes
         // Want to connect them with any previous node that is non-zero and has zero out-edges
-        output_->verbose(CALL_INFO, 1, 0, "\nChecking for orphans...\n");
+        // output_->verbose(CALL_INFO, 1, 0, "\nChecking for orphans...\n");
+        llvm::errs() <<  "\nChecking for orphans...\n";
 
         auto cdfgVertexMap = g.getVertexMap();
         for(auto cdfgGraphIter = cdfgVertexMap->begin(); cdfgGraphIter != cdfgVertexMap->end(); ++cdfgGraphIter) {
@@ -1734,7 +1378,8 @@ void Parser::assembleGraph(void)
 
 void Parser::mergeGraphs()
 {
-    output_->verbose(CALL_INFO, 1, 0, "\nMerging graphs\n");
+    // output_->verbose(CALL_INFO, 1, 0, "\nMerging graphs\n");
+    llvm::errs() <<  "\nMerging graphs\n";
 
     functionGraph_ = new CDFG;
     BBGraph &bbg = *bbGraph_;
@@ -1748,7 +1393,8 @@ void Parser::mergeGraphs()
     functionGraph_->printDot("00_func.dot");
 
     // Connect the individual basic blocks back together
-    output_->verbose(CALL_INFO, 1, 0, "...adding edges...\n");
+    // output_->verbose(CALL_INFO, 1, 0, "...adding edges...\n");
+    llvm::errs() <<   "...adding edges...\n";
 
     auto funcVertexMap = functionGraph_->getVertexMap();
     for( auto vertexIterator = funcVertexMap->begin(); vertexIterator != funcVertexMap ->end(); ++vertexIterator ) {
@@ -1788,7 +1434,7 @@ void Parser::mergeGraphs()
                                 connectorList.push_back(targetIns);
                             } else {
                                 for( auto operandIter = targetIns->op_begin(), operandEnd = targetIns->op_end(); operandIter != operandEnd; operandIter++ ) {
-                                    if( llvm::isa<llvm::Instruction>(*operandIter) ) {
+                                    if( llvm::isa< llvm::Instruction >(*operandIter) ) {
                                         for( std::vector< CDFGVertex* >::reverse_iterator revIt = targetIter + 1; revIt != (*vertexList_)[nextBB].rend(); ++revIt) {
                                             if( (*revIt)->instruction_ == *operandIter ) {
                                                 found = 1;
@@ -1836,10 +1482,60 @@ void Parser::mergeGraphs()
         }
     }
 
-    output_->verbose(CALL_INFO, 1, 0, "...merge finished\n");
+    // output_->verbose(CALL_INFO, 1, 0, "...merge finished\n");
+    llvm::errs() << "...merge finished\n";
     functionGraph_->printDot("00_func-m.dot");
 
 }//END mergeGraphs
+
+void Parser::fixOperations( )
+{
+    auto funcVertexMap = functionGraph_->getVertexMap();
+    for( auto vertexIterator = funcVertexMap->begin(); vertexIterator != funcVertexMap ->end(); ++vertexIterator ) {
+
+        llvm::Instruction* tempInstruction = vertexIterator->second.getValue()->instruction_;
+        if( tempInstruction != NULL ) {
+            llvm::errs() << "vertex: " << vertexIterator->first << "\n";
+
+            // FIXME We don't really need allocations with the loop blocks, so remove them (for now)
+            if( llvm::AllocaInst *allocaInst = llvm::dyn_cast< llvm::AllocaInst >(tempInstruction) ) {
+                vertexIterator->second.getValue()->instruction_ = NULL;
+
+                llvm::errs() << "Alloc ADDR " << vertexIterator->second.getValue()->memAddr_ << "\n";
+            }
+//             else if( llvm::StoreInst *storeInst = llvm::dyn_cast< llvm::StoreInst >(tempInstruction) ) {
+//                 llvm::Instruction* inst = llvm::dyn_cast< llvm::Instruction >(storeInst->getPointerOperand());
+//
+//                 llvm::BasicBlock *parentBB = tempInstruction->getParent();
+//                 llvm::errs() << parentBB << "\n";
+//
+//                 auto mooCows = useNode_->find(parentBB);
+//                 if( mooCows != useNode_->end() ) {
+//                     std::map< CDFGVertex*, std::vector< llvm::Instruction* >* >* innerMap = mooCows->second;
+//                     for( auto innerIt = innerMap->begin(); innerIt != innerMap->end(); ++innerIt ) {
+//                         std::vector< llvm::Instruction* >* kittyCats = innerIt->second;
+//                         for( auto doggies = kittyCats->begin(); doggies != kittyCats->end(); ++doggies ) {
+//                             if( *doggies == inst ) {
+//                                 // Process each instruction
+//                                 llvm::errs() << "Found Instruction: ";
+//                                 inst->print(llvm::errs());
+//                                 llvm::errs() << "\n";
+//                                 llvm::errs() << "ADDR " << innerIt->first->memAddr_ << "\n";
+//
+//                             }
+//                         }
+//                     }
+//
+//                 }
+//
+//             }
+
+        }
+
+    }
+
+
+}//END fixOperations
 
 void Parser::printCDFG( const std::string fileName ) const
 {
@@ -1881,15 +1577,14 @@ void Parser::printCDFG( const std::string fileName ) const
 
 void Parser::printVertex ( const CDFGVertex* vertexIn ) const
 {
-    std::cerr << vertexIn->instruction_ << std::endl;
-    std::cerr << "\t" << vertexIn->instructionName_ << std::endl;
-    std::cerr << "\t" << vertexIn->valueName_ << std::endl;
-    std::cerr << "\t\t" << vertexIn->haveConst_ << std::endl;
-    std::cerr << "\t\t" << vertexIn->intConst_ << std::endl;
-    std::cerr << "\t\t" << vertexIn->floatConst_ << std::endl;
-    std::cerr << "\t\t" << vertexIn->doubleConst_ << std::endl;
-//     std::cerr << "\t" << vertexIn->leftArg_ << std::endl;
-//     std::cerr << "\t" << vertexIn->rightArg_ << std::endl;
+    llvm::errs() << vertexIn->instruction_ << "\n";
+    llvm::errs() << "\t" << vertexIn->instructionName_ << "\n";
+    llvm::errs() << "\t" << vertexIn->valueName_ << "\n";
+    llvm::errs() << "\t\t" << vertexIn->haveConst_ << "\n";
+    llvm::errs() << "\t\t" << vertexIn->intConst_ << "\n";
+    llvm::errs() << "\t\t" << vertexIn->floatConst_ << "\n";
+    llvm::errs() << "\t\t" << vertexIn->doubleConst_ << "\n";
+
 }
 
 void Parser::printPyMapper( const std::string fileName ) const
@@ -1927,8 +1622,6 @@ void Parser::printPyMapper( const std::string fileName ) const
             for( auto operandIter = tempInstruction->op_begin(), operandEnd = tempInstruction->op_end(); operandIter != operandEnd; ++operandIter ) {
                 if( first != 0 ) {
                     outputFile << ":";
-                } else {
-                    first = 1;
                 }
 
                 std::cout << operandIter->get()->getNameOrAsOperand() << " -- boopA" << std::endl;
@@ -1959,6 +1652,7 @@ void Parser::printPyMapper( const std::string fileName ) const
                             outputFile << "";
                             newOpcode = operandIter->get()->getNameOrAsOperand();
                         } else {
+                            first = 1;
                             outputFile << operandIter->get()->getNameOrAsOperand();
                             std::cout << operandIter->get()->getNameOrAsOperand() << " -- boopG" << std::endl;
                         }
@@ -1967,8 +1661,29 @@ void Parser::printPyMapper( const std::string fileName ) const
                         exit(0);
                     }
                 } else {
-                    outputFile << operandIter->get()->getNameOrAsOperand();
-                    std::cout << operandIter->get()->getNameOrAsOperand() << " -- boopC" << std::endl;
+                    // We're monkeying with the allocate/stores
+                    // For Store, consts are first (if ever) followed by the pointer
+                    // staddr expects the address first
+                    if( llvm::isa<llvm::AllocaInst>( operandIter ) && operandIter->get()->getType()->isPointerTy() ) {
+                        if( constVector.find(0) != constVector.end() ) {
+                            std::string tempValue = constVector[0];
+
+                            if (constVector.find(1) != constVector.end()) {
+                                std::cout << "Warning: Overwriting existing value at key 1: " << constVector[1] << std::endl;
+                            }
+
+                            constVector[1] = tempValue;
+                        } else {
+                            std::cout << "Key 0 does not exist.\n";
+                        }
+
+                        constVector[0] = std::to_string(vertexIterator->second.getValue()->memAddr_);
+
+                    } else {
+                        first = 1;
+                        outputFile << operandIter->get()->getNameOrAsOperand();
+                        std::cout << operandIter->get()->getNameOrAsOperand() << " -- boopC" << std::endl;
+                    }
                 }
 
             }//end for

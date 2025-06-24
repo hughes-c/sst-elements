@@ -90,7 +90,8 @@ public:
             }
         }
 
-        //if all inputs are available pull from queue and add to arg list
+        // if all inputs are available pull from queue and add to arg list
+        // exception are INIT PEs which only use the first value received on inputs-0/1
         if( num_inputs == 0 || num_ready < num_inputs ) {
             output_->verbose(CALL_INFO, 4, 0, "-Inputs %" PRIu32 " Ready %" PRIu32 " Fire %" PRIu16 "\n", num_inputs, num_ready, cycles_to_fire_);
             return false;
@@ -109,7 +110,16 @@ public:
                     std::cout << input_queues_->at(i)->data_queue_->front() << "\n";
                     std::cout << "Pushed " << argList.front() << std::endl;
                     input_queues_->at(i)->forwarded_ = 0;
-                    input_queues_->at(i)->data_queue_->pop();
+
+                    //NOTE This is super hacky and need to rethink init PEs
+                    //  take care of the fact that we don't want init'd PEs to overwrite the value
+                    if( op_binding_ == EQ_INIT ) {
+                        if( i !=  1 ) {
+                            input_queues_->at(i)->data_queue_->pop();
+                        }
+                    } else {
+                        input_queues_->at(i)->data_queue_->pop();
+                    }
                 }
             }
             cycles_to_fire_ = latency_;
@@ -147,6 +157,7 @@ public:
                 retVal = (argList[0] >> argList[1].to_ullong()) | (argList[0] << (Bit_Length - argList[1].to_ullong()));
                 break;
             case EQ :
+            case EQ_INIT :
             case NE :
             case UGT :
             case UGE :
@@ -208,7 +219,7 @@ protected:
         std::cout << "LOGIC ARG[0]:" << arg0 << "::" << arg0.to_ullong() << std::endl;
         std::cout << "LOGIC ARG[1]:" << arg1 << "::" << arg1.to_ullong() << std::endl;
 
-        if( op == EQ || op == EQ_IMM ) {
+        if( op == EQ || op ==  EQ_INIT || op == EQ_IMM ) {
             if( arg0.to_ullong() == arg1.to_ullong() ) {
                 return 1;
             } else {

@@ -78,6 +78,8 @@ inline opType const getOptype(std::string &opString)
         operation = ROR;
     else if( opString == "EQ" )
         operation = EQ;
+    else if( opString == "EQ_INIT" )
+        operation = EQ_INIT;
     else if( opString == "EQ_IMM" )
         operation = EQ_IMM;
     else if( opString == "NE" )
@@ -182,6 +184,8 @@ inline opType const getOptype(std::string &opString)
         operation = GATED_ONE;
     else if( opString == "MERGE" )
         operation = MERGE;
+    else if( opString == "FORWARD" )
+        operation = FORWARD;
     else if( opString == "FILTER" )
         operation = FILTER;
     else if( opString == "SEL" )
@@ -238,6 +242,8 @@ inline std::string const getOpString(const opType &op)
         operation = "ROR";
     else if( op == EQ )
         operation = "EQ";
+    else if( op == EQ_INIT )
+        operation = "EQ_INIT";
     else if( op == EQ_IMM )
         operation = "EQ_IMM";
     else if( op == NE )
@@ -340,6 +346,8 @@ inline std::string const getOpString(const opType &op)
         operation = "GATED_ONE";
     else if( op == MERGE )
         operation = "MERGE";
+    else if( op == FORWARD )
+        operation = "FORWARD";
     else if( op == FILTER )
         operation = "FILTER";
     else if( op == REPEATER )
@@ -427,6 +435,8 @@ inline PairPE process_pair(std::string str, char delim)
     std::string field1 = std::string(data[0][0]);
     std::string field2 = std::string(data[0][1]);
 
+    std::cout <<  "pair-FIELD 2" <<  field2 << std::endl;
+
     return PairPE(field1, std::stoi(field2));
 }
 
@@ -438,6 +448,9 @@ inline TriplePE process_triple(std::string str, char delim)
     std::string field1 = std::string(data[0][0]);
     std::string field2 = std::string(data[0][1]);
     std::string field3 = std::string(data[0][2]);
+
+    std::cout <<  "triple-FIELD 2" <<  field2 << std::endl;
+    std::cout <<  "triple-FIELD 3" <<  field3 << std::endl;
 
     return TriplePE(field1, std::stoi(field2), std::stoi(field3));
 }

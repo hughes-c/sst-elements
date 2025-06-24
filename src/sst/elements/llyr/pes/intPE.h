@@ -431,26 +431,6 @@ public:
             }
         }
 
-        // // if there is an extra non-routed input queue, this is a triggered PE
-        // if( num_inputs == 3 && input_queues_->at(2)->data_queue_->size() > 0 ) {
-        //     triggered_ = 1;
-        //     input_queues_->at(2)->data_queue_->pop();
-        //
-        //     // reset if necessary
-        //     if( initialized_ == 1 ) {
-        //         initialized_ = 2;
-        //     } else {
-        //         input_queues_->at(0)->data_queue_->push(init0_);
-        //         input_queues_->at(1)->data_queue_->push(init1_);
-        //     }
-        // }
-        // std::cout << std::flush;
-        //
-        // // tricksy to force event
-        // if( triggered_ == 1 ) {
-        //     num_inputs = num_inputs - 1;
-        // }
-
         //if there are values waiting on any of the inputs, this PE could still fire
         if( num_ready < num_inputs && num_ready > 0) {
             pending_op_ = 1;
@@ -474,8 +454,40 @@ public:
         std::cout << ", Triggered: " << triggered_;
         std::cout << ", Init: " << initialized_ << std::endl;
 
-        //if all inputs are available pull from queue and add to arg list
-        if( num_inputs == 0 || num_ready < num_inputs ) {
+        // if all inputs are available pull from queue and add to arg list
+        // exception is INC_INIT,  which can fire without an init value
+        if( op_binding_ == INC_INIT && num_ready > 1 ) {
+            output_->verbose(CALL_INFO, 4, 0, "+Inputs %" PRIu32 " Ready %" PRIu32 "\n", num_inputs, num_ready);
+
+            if( input_queues_->at(2)->data_queue_ !=  nullptr ) {
+                if( input_queues_->at(2)->data_queue_->size() > 0 ) {
+                    //input_queues_->at(0)->data_queue_ = input_queues_->at(2)->data_queue_;
+                    delete input_queues_->at(0)->data_queue_;
+                    input_queues_->at(0)->data_queue_ = new std::queue< LlyrData >(*input_queues_->at(2)->data_queue_);
+                }
+            }
+
+            if(input_queues_->at(1)->data_queue_ !=  nullptr) {
+                if (input_queues_->at(1)->data_queue_->size() > 0 ) {
+                    output_->verbose(CALL_INFO, 4, 0, "+Inputs %" PRIu32 " Ready %" PRIu32 " Fire %" PRIu16 "\n", num_inputs, num_ready, cycles_to_fire_);
+                    for( uint32_t i = 0; i < total_num_inputs; ++i) {
+                        if( input_queues_->at(i)->argument_ > -1 ) {
+                            if( input_queues_->at(i)->data_queue_->size() > 0 ) {
+                                argList.push_back(input_queues_->at(i)->data_queue_->front());
+                                input_queues_->at(i)->forwarded_ = 0;
+                                input_queues_->at(i)->data_queue_->pop();
+                            }
+                        }
+                    }
+                    cycles_to_fire_ = latency_;
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+
+        } else if( num_inputs == 0 || num_ready < num_inputs ) {
             output_->verbose(CALL_INFO, 4, 0, "-Inputs %" PRIu32 " Ready %" PRIu32 " Fire %" PRIu16 "\n", num_inputs, num_ready, cycles_to_fire_);
             return false;
         } else if( cycles_to_fire_ > 0 ) {
@@ -498,7 +510,7 @@ public:
         // If data tokens in output queue then simulation cannot end
         pending_op_ = 1;
 
-        if( op_binding_ == INC ) {
+        if( op_binding_ == INC ||  op_binding_ ==  INC_INIT ) {
             if( triggered_ == 0 ) {
                 intResult = argList[0].to_ullong();
                 input_queues_->at(0)->data_queue_->push(LlyrData(intResult + 1));
@@ -571,55 +583,6 @@ public:
                     input_queues_->at(1)->data_queue_->push(LlyrData(init1_));
                     input_queues_->at(2)->data_queue_->pop();
                 }
-            }
-        } else if( op_binding_ == INC_INIT ) {
-            if( triggered_ == 0 ) {
-                if( new_init_ready_ == 0 ) {
-                    new_init_ready_ = 1;
-                    intResult = argList[1].to_ullong();
-                }
-//                 if( new_init_ready_ == 1 ) {
-//                     intResult = argList[2].to_ullong();
-//                     new_init_ready_ = 0;
-//                 } else {
-//                     intResult = argList[0].to_ullong();
-//                 }
-                input_queues_->at(0)->data_queue_->push(LlyrData(intResult + 1));
-
-                retVal = LlyrData(intResult);
-
-                output_->verbose(CALL_INFO, 32, 0, "intResult = %" PRIu64 "\n", intResult);
-                output_->verbose(CALL_INFO, 32, 0, "retVal = %s\n", retVal.to_string().c_str());
-
-                // for now push the result to all output queues that need this result
-                for( uint32_t i = 0; i < output_queues_->size(); ++i ) {
-                    if( *output_queues_->at(i)->routing_arg_ == "" ) {
-                        output_queues_->at(i)->data_queue_->push(retVal);
-                    }
-                }
-
-                if( output_->getVerboseLevel() >= 10 ) {
-                    output_->verbose(CALL_INFO, 10, 0, "Queue Contents (1)\n");
-                    printInputQueue();
-                    printOutputQueue();
-                }
-            } else if( triggered_ == 1 ){
-                triggered_ = 0;
-
-                retVal = LlyrData(intResult);
-
-                output_->verbose(CALL_INFO, 32, 0, "intResult = %" PRIu64 "\n", intResult);
-                output_->verbose(CALL_INFO, 32, 0, "retVal = %s\n", retVal.to_string().c_str());
-
-                if( output_->getVerboseLevel() >= 10 ) {
-                    output_->verbose(CALL_INFO, 10, 0, "Queue Contents (1)\n");
-                    printInputQueue();
-                    printOutputQueue();
-                }
-            }
-
-            if( argList[0].to_ullong() <= argList[1].to_ullong() ) {
-                new_init_ready_ = 1;
             }
         } else if( op_binding_ == ACC ) {
             // need to save the next accumulator value

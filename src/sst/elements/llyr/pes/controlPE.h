@@ -90,7 +90,7 @@ public:
 
         // if all inputs are available pull from queue and add to arg list
         // exception is MERGE, which will forward the first data token to arrive
-        // exception is REPEATER, which is the bane of my existance
+        // exception is REPEATER, which is the bane of my existence
         if( op_binding_ == MERGE && num_ready > 0 ) {
             output_->verbose(CALL_INFO, 4, 0, "+Inputs %" PRIu32 " Ready %" PRIu32 "\n", num_inputs, num_ready);
             for( uint32_t i = 0; i < total_num_inputs; ++i) {
@@ -169,6 +169,7 @@ public:
             case ONEONAND :
             case GATED_ONE :
             case MERGE :
+            case FORWARD :
             case REPEATER :
                 tempReturn = helperFunction(op_binding_, argList[0], argList[1], argList[2]);
                 retVal = std::get<2>(tempReturn);
@@ -278,6 +279,7 @@ protected:
         // MERGE - Choose One: Forward first token to arrive
         // REPEATER - Repeater: If ctrl = 0, fwd buffer; if buffer empty, fill buffer and fwd; if ctrl = 1, fill buffer
         // FILTER - Filter: Filter based on value (e.g. if filter 0s, forward all but 0s)
+        // FORWARD - Forward: Forward input token
         if( op == SEL ) {
             if( arg2.valid_ == 1 ) {
                 switch( arg2.data_.to_ullong() ) {
@@ -377,6 +379,12 @@ protected:
                 return std::make_tuple(0, 0, LlyrData(0x00));
             } else {
                 return std::make_tuple(1, 1, LlyrData(arg1.data_));
+            }
+        } else if( op == FORWARD ) {
+            if( arg0.valid_ == 1 ) {
+                return std::make_tuple(1, 0, arg0.data_);
+            } else {
+                return std::make_tuple(0, 0, LlyrData(0xFF));
             }
         } else if( op == REPEATER ) {
             if( arg0.valid_ == 1 && arg0.data_[0] == 0 ) {

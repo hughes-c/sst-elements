@@ -45,6 +45,7 @@ struct alignas(int64_t) CDFGVertex
    llvm::Instruction*  instruction_;
    std::string         valueName_;
 
+   Addr                memAddr_;
    bool                haveConst_;
    int64_t             intConst_;
    float               floatConst_;
@@ -60,8 +61,8 @@ typedef LlyrGraph< llvm::BasicBlock* > BBGraph;
 class Parser
 {
 public:
-    Parser(const std::string& offloadString, SST::Output* output) :
-    output_(output), offloadString_(offloadString)
+    Parser(const std::string& offloadString, SST::Output* output, Addr startingAddr) :
+    output_(output), offloadString_(offloadString), currentAddr_ (startingAddr)
     {
         vertexList_ = new std::map< llvm::BasicBlock*, std::vector< CDFGVertex* > >;
 
@@ -83,6 +84,8 @@ private:
     std::string  offloadString_;
     std::string  offloadTarget_;
 
+    Addr         currentAddr_;
+
     BBGraph* bbGraph_;
     CDFG*    functionGraph_;
 
@@ -100,6 +103,8 @@ private:
     void expandBBGraph(llvm::Function* func);
     void assembleGraph();
     void mergeGraphs();
+
+    void fixOperations();
 
     void printVertex ( const CDFGVertex* ) const;
     void printCDFG( const std::string fileName ) const;

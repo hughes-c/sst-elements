@@ -81,6 +81,8 @@ void LlyrMapper::addNode(opType op_binding, uint32_t nodeNum, LlyrGraph< Process
         tempPE = new LogicProcessingElement( ROR, nodeNum, llyr_config );
     } else if( op_binding == EQ ) {
         tempPE = new LogicProcessingElement( EQ, nodeNum, llyr_config );
+    } else if( op_binding == EQ_INIT ) {
+        tempPE = new LogicProcessingElement( EQ_INIT, nodeNum, llyr_config );
     } else if( op_binding == NE ) {
         tempPE = new LogicProcessingElement( NE, nodeNum, llyr_config );
     } else if( op_binding == UGT ) {
@@ -141,6 +143,8 @@ void LlyrMapper::addNode(opType op_binding, uint32_t nodeNum, LlyrGraph< Process
         tempPE = new ControlProcessingElement( GATED_ONE, nodeNum, llyr_config );
     } else if( op_binding == MERGE ) {
         tempPE = new ControlProcessingElement( MERGE, nodeNum, llyr_config );
+    } else if( op_binding == FORWARD ) {
+        tempPE = new ControlProcessingElement( FORWARD, nodeNum, llyr_config );
     } else if( op_binding == SEL ) {
         tempPE = new ControlProcessingElement( SEL, nodeNum, llyr_config );
     } else if( op_binding == ROUTE ) {
