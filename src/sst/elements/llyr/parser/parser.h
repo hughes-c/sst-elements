@@ -18,6 +18,11 @@
 
 #define DEBUG
 
+// TODO Temporary -- need to fix
+# ifdef PIC
+# undef PIC
+# endif
+
 #include <sst/core/sst_config.h>
 
 #include <vector>
@@ -26,6 +31,13 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Instruction.h>
+
+# include "llvm/IR/Function.h"
+# include "llvm/IR/PassManager.h"
+# include "llvm/IR/Module.h"
+# include "llvm/Passes/PassBuilder.h"
+# include "llvm/Passes/PassPlugin.h"
+# include "llvm/Analysis/LoopAnalysisManager.h"
 
 #include "graph/graph.h"
 #include "pes/peList.h"
@@ -78,6 +90,10 @@ public:
     void generateAppGraph( std::string functionName );
 
 protected:
+    llvm::ModuleAnalysisManager MAM;
+    llvm::CGSCCAnalysisManager CGAM;
+    llvm::FunctionAnalysisManager FAM;
+    llvm::LoopAnalysisManager LAM;
 
 private:
     SST::Output* output_;

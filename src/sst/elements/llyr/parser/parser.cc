@@ -119,7 +119,8 @@ void Parser::generateAppGraph(std::string functionName)
 
 }// generateAppGraph
 
-void Parser::runAnalysisOnFunction(llvm::Function* func) {
+void Parser::runAnalysisOnFunction(llvm::Function* func)
+{
     if (!func) {
         llvm::errs() << "Error: Null function provided.\n";
         return;
@@ -130,10 +131,10 @@ void Parser::runAnalysisOnFunction(llvm::Function* func) {
     llvm::errs() << "   ------  END FUNCTION IR BEFORE  ------    " << "\n";
 
     // Analysis Managers needed for passes
-    llvm::ModuleAnalysisManager MAM;
-    llvm::CGSCCAnalysisManager CGAM;
-    llvm::FunctionAnalysisManager FAM;
-    llvm::LoopAnalysisManager LAM;
+//     llvm::ModuleAnalysisManager MAM;
+//     llvm::CGSCCAnalysisManager CGAM;
+//     llvm::FunctionAnalysisManager FAM;
+//     llvm::LoopAnalysisManager LAM;
 
     // Register required analyses for each level (Module, CGSCC, Function, Loop)
     llvm::PassBuilder PB;
@@ -169,7 +170,7 @@ void Parser::runAnalysisOnFunction(llvm::Function* func) {
     llvm::errs() << "   ------  FUNCTION IR AFTER ------    " << "\n";
     func->print(llvm::errs());
     llvm::errs() << "   ------  END FUNCTION IR AFTER  ------    " << "\n";
-  }
+}
 
 void Parser::generatebBasicBlockGraph(llvm::Function* func)
 {
@@ -937,6 +938,21 @@ void Parser::expandBBGraph(llvm::Function* func)
                 }
 
             //END GEP
+            } else if (tempOpcode == llvm::Instruction::PHI) { // BEGIN PHI handling
+                llvm::PHINode* phiInst = llvm::cast<llvm::PHINode>(instructionIter);
+
+                llvm::errs() << "\n[Debug] Found PHI node: " << *phiInst << "\n";
+                llvm::errs() << "  Incoming edges: " << phiInst->getNumIncomingValues() << "\n";
+
+
+                auto *tempUseVector = new std::vector<llvm::Instruction*>();
+
+                for( uint32_t idx = 0; idx < phiInst->getNumIncomingValues(); ++idx ) {
+                    llvm::Value* val = phiInst->getIncomingValue(idx);
+                }
+
+
+
             } else if( tempOpcode == llvm::Instruction::ICmp || tempOpcode == llvm::Instruction::FCmp ) {   // BEGIN Int/Float Compare
                 std::vector< llvm::Instruction* > *tempUseVector = new std::vector< llvm::Instruction* >;
                 std::vector< llvm::Instruction* > *tempDefVector = new std::vector< llvm::Instruction* >;
@@ -952,7 +968,6 @@ void Parser::expandBBGraph(llvm::Function* func)
                             outputVertex->intConst_ = tempConst->getSExtValue();
                             outputVertex->floatConst_ = 0x00;
                             outputVertex->doubleConst_ = 0x00;
-
 
                         } else if( llvm::isa<llvm::ConstantFP>(tempOperand) ) {                          // floats and doubles
                             llvm::ConstantFP* tempConst = llvm::cast<llvm::ConstantFP>(tempOperand);
@@ -1748,6 +1763,5 @@ void Parser::printPyMapper( const std::string fileName ) const
 
 } // namespace llyr
 } // namespace SST
-
 
 
