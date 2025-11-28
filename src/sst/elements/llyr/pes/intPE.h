@@ -510,7 +510,7 @@ public:
         // If data tokens in output queue then simulation cannot end
         pending_op_ = 1;
 
-        if( op_binding_ == INC ||  op_binding_ ==  INC_INIT ) {
+        if( op_binding_ == INC || op_binding_ ==  INC_INIT ) {
             if( triggered_ == 0 ) {
                 intResult = argList[0].to_ullong();
                 input_queues_->at(0)->data_queue_->push(LlyrData(intResult + 1));

@@ -32,6 +32,14 @@ public:
     {
         latency_ = llyr_config->arith_latency_;
         cycles_to_fire_ = latency_;
+
+        // //  make sure the queues for the init pe's are marked
+        // if( op_binding_ == EQ_INIT ) {
+        //     if( auto* src = getQueueSlot(0) ) {
+        //         input_queues_->at(0)->argument_ = -1;
+        //     }
+        // }
+
     }
 
     virtual bool doReceive(LlyrData data) { return 0; };
@@ -45,6 +53,25 @@ public:
         std::vector< LlyrData > argList;
         LlyrData retVal;
 
+        // auto get_queue_slot = [&](std::size_t i) -> LlyrQueue* {
+        //     if( !input_queues_ || input_queues_->size() <= i ) return nullptr;
+        //     return (*input_queues_)[i];
+        // };
+        //
+        // auto ensure_queue_exists = [&](std::size_t i) -> LlyrQueue* {
+        //     if (!input_queues_) return nullptr;
+        //     if (input_queues_->size() <= i) input_queues_->resize(i + 1, nullptr);
+        //     auto*& tempQueue = (*input_queues_)[i];
+        //     if( !tempQueue ) {
+        //         tempQueue = new LlyrQueue;
+        //         tempQueue->forwarded_ = 0;
+        //         tempQueue->argument_ = 0;
+        //         tempQueue->routing_arg_ = new std::string("");
+        //         tempQueue->data_queue_ = new std::queue< LlyrData >;
+        //     }
+        //     return tempQueue;
+        // };
+
         if( output_->getVerboseLevel() >= 10 ) {
             output_->verbose(CALL_INFO, 10, 0, "Queue Contents (0)\n");
             printInputQueue();
@@ -54,6 +81,7 @@ public:
         uint32_t num_ready = 0;
         uint32_t num_inputs = 0;
         uint32_t total_num_inputs = input_queues_->size();
+
 
         // discover which of the input queues are used for the compute
         for( uint32_t i = 0; i < total_num_inputs; ++i) {
@@ -92,7 +120,60 @@ public:
 
         // if all inputs are available pull from queue and add to arg list
         // exception are INIT PEs which only use the first value received on inputs-0/1
-        if( num_inputs == 0 || num_ready < num_inputs ) {
+        // NOTE This is super hacky and need to rethink init PEs
+        if( op_binding_ == EQ_INIT && num_ready > 1 ) {
+            output_->verbose(CALL_INFO, 4, 0, "+Inputs %" PRIu32 " Ready %" PRIu32 "\n", num_inputs, num_ready);
+
+            //  eq_init is technically 3-inputs: 0-init_value; 1-left; 2-right
+            //  in-0 is used to initialize in-2 (this should be the left-hand value but it's eq...)
+            constexpr uint64_t init_queue = 0;
+            constexpr uint64_t right_queue = 2;
+
+            if( auto* src = getQueueSlot(init_queue) ) {
+                if( src->data_queue_ && !src->data_queue_->empty() ) {
+                    if( auto* dst = ensureQueueExists(right_queue) ) {
+                        if( dst->data_queue_ ) {
+                            delete dst->data_queue_;
+                        }
+                        dst->data_queue_ = new std::queue< LlyrData >(*src->data_queue_);
+                        input_queues_->at(init_queue)->data_queue_->pop();
+                    }
+                }
+            }
+
+            //  if we get to this point,  we want the data from queues 1 and 2
+            //  we know that queue 2 has valid data from above,  so check queue 1
+            //  increment at (i + 1)
+            if( input_queues_->at(1)->data_queue_ !=  nullptr ) {
+                if( input_queues_->at(1)->data_queue_->size() > 0 ) {
+                    output_->verbose(CALL_INFO, 4, 0, "+Inputs %" PRIu32 " Ready %" PRIu32 " Fire %" PRIu16 "\n", num_inputs, num_ready, cycles_to_fire_);
+                    std::cout <<  "Total inputs: " << total_num_inputs << std::endl;
+                    // in-0 is technically an input still but we don't want to use it in the compare
+                    for( uint32_t i = 1; i < total_num_inputs; ++i ) {
+                        uint64_t next_queue = i;
+                        if( input_queues_->at(next_queue)->argument_ > -1 ) {
+                            auto* temp_data_queue = input_queues_->at(next_queue)->data_queue_;
+                            if( temp_data_queue && !temp_data_queue->empty() ) {
+                                std::cout << "Pushing (" << i << ") ";
+                                argList.push_back(temp_data_queue->front());
+                                std::cout << "Pushed " << argList.front() << std::endl;
+                                input_queues_->at(next_queue)->forwarded_ = 0;
+                                if( next_queue != right_queue ) {
+                                    temp_data_queue->pop();
+                                }
+                            }
+                        }
+                    }
+
+                    cycles_to_fire_ = latency_;
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+
+        } else if( num_inputs == 0 || num_ready < num_inputs ) {
             output_->verbose(CALL_INFO, 4, 0, "-Inputs %" PRIu32 " Ready %" PRIu32 " Fire %" PRIu16 "\n", num_inputs, num_ready, cycles_to_fire_);
             return false;
         } else if( cycles_to_fire_ > 0 ) {
@@ -110,16 +191,7 @@ public:
                     std::cout << input_queues_->at(i)->data_queue_->front() << "\n";
                     std::cout << "Pushed " << argList.front() << std::endl;
                     input_queues_->at(i)->forwarded_ = 0;
-
-                    //NOTE This is super hacky and need to rethink init PEs
-                    //  take care of the fact that we don't want init'd PEs to overwrite the value
-                    if( op_binding_ == EQ_INIT ) {
-                        if( i !=  1 ) {
-                            input_queues_->at(i)->data_queue_->pop();
-                        }
-                    } else {
-                        input_queues_->at(i)->data_queue_->pop();
-                    }
+                    input_queues_->at(i)->data_queue_->pop();
                 }
             }
             cycles_to_fire_ = latency_;
@@ -157,7 +229,6 @@ public:
                 retVal = (argList[0] >> argList[1].to_ullong()) | (argList[0] << (Bit_Length - argList[1].to_ullong()));
                 break;
             case EQ :
-            case EQ_INIT :
             case NE :
             case UGT :
             case UGE :
@@ -167,6 +238,9 @@ public:
             case ULE :
             case SLT :
             case SLE :
+                retVal = helperFunction(op_binding_, argList[0], argList[1]);
+                break;
+            case EQ_INIT :
                 retVal = helperFunction(op_binding_, argList[0], argList[1]);
                 break;
             default :
@@ -216,8 +290,7 @@ protected:
 //         int64_t boo = (int64_t)(y.to_ulong());
 //         std::bitset<64> bitTestL  = boo;
 
-        std::cout << "LOGIC ARG[0]:" << arg0 << "::" << arg0.to_ullong() << std::endl;
-        std::cout << "LOGIC ARG[1]:" << arg1 << "::" << arg1.to_ullong() << std::endl;
+        output_->verbose(CALL_INFO, 0, 0, "ARG[0]%" PRIu64 " ARG[1]%" PRIu64 ".\n", static_cast<uint64_t>(arg0.to_ullong()), static_cast<uint64_t>(arg1.to_ullong()));
 
         if( op == EQ || op ==  EQ_INIT || op == EQ_IMM ) {
             if( arg0.to_ullong() == arg1.to_ullong() ) {

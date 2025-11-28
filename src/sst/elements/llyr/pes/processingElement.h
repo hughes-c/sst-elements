@@ -469,6 +469,36 @@ printOutputQueue();
         return global_route;
     }
 
+    LlyrQueue* getQueueSlot(uint64_t i) const
+    {
+        if( !input_queues_ || input_queues_->size() <= i ) {
+            return nullptr;
+        }
+
+        return (*input_queues_)[i];
+    }
+
+    LlyrQueue* ensureQueueExists(uint64_t i)
+    {
+        if( !input_queues_ ) {
+            return nullptr;
+        }
+
+        if( input_queues_->size() <= i ) {
+            input_queues_->resize(i + 1, nullptr);
+        }
+
+        auto*& tempQueue = (*input_queues_)[i];
+        if( !tempQueue ) {
+            tempQueue = new LlyrQueue;
+            tempQueue->forwarded_ = 0;
+            tempQueue->argument_ = 0;
+            tempQueue->routing_arg_ = new std::string("");
+            tempQueue->data_queue_ = new std::queue< LlyrData >;
+        }
+        return tempQueue;
+    }
+
 private:
 
 };
